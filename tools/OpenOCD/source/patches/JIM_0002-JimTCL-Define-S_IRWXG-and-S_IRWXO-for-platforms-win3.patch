@@ -1,0 +1,31 @@
+From 04dcef5b6f0c373ea24ff1ee5c1a46a820383214 Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Tue, 10 Feb 2015 17:36:54 +0000
+Subject: [PATCH 2/2] JimTCL : Define S_IRWXG and S_IRWXO for platforms (win32)
+ where they don't exist
+
+---
+ jim-aio.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/jim-aio.c b/jim-aio.c
+index 9432c97..1cf7119 100644
+--- a/jim-aio.c
++++ b/jim-aio.c
+@@ -86,6 +86,13 @@
+ #endif
+ #endif
+ 
++#ifndef S_IRWXG
++#define S_IRWXG (0)
++#endif /* S_IRWXG */
++#ifndef S_IRWXO
++#define S_IRWXO (0)
++#endif /* S_IRWXO */
++
+ #if !defined(JIM_ANSIC) && !defined(JIM_BOOTSTRAP)
+ union sockaddr_any {
+     struct sockaddr sa;
+-- 
+1.8.3.msysgit.0
+

@@ -1,0 +1,26 @@
+From 4b7d438cdc6afef20c3bf250212b40deeefd951c Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Thu, 20 Nov 2014 13:51:13 +0000
+Subject: [PATCH 33/40] gdb_server: Add check for malloc fail
+
+---
+ src/server/gdb_server.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/server/gdb_server.c b/src/server/gdb_server.c
+index 0ceba35..c741f0c 100644
+--- a/src/server/gdb_server.c
++++ b/src/server/gdb_server.c
+@@ -1168,6 +1168,9 @@ static int gdb_get_registers_packet(struct connection *connection,
+ 	assert(reg_packet_size > 0);
+ 
+ 	reg_packet = malloc(reg_packet_size + 1); /* plus one for string termination null */
++	if ( reg_packet == NULL )
++		return ERROR_FAIL;
++
+ 	reg_packet_p = reg_packet;
+ 
+ 	for (i = 0; i < reg_list_size; i++) {
+-- 
+1.8.3.msysgit.0
+

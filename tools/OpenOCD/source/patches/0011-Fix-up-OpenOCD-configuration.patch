@@ -1,0 +1,50 @@
+From f536f9db03342697460ddfb8263f7d9212ecada7 Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Wed, 16 Apr 2014 16:08:07 +0100
+Subject: [PATCH 25/40] Fix up OpenOCD configuration
+
+---
+ bootstrap    | 4 ++--
+ configure.ac | 5 +++++
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/bootstrap b/bootstrap
+index 3b60fc6..aceccc9 100755
+--- a/bootstrap
++++ b/bootstrap
+@@ -22,14 +22,14 @@ elif [ -n "$1" ]; then
+ fi
+ 
+ # bootstrap the autotools
+-(
++
+ set -x
+ aclocal
+ ${libtoolize} --automake --copy
+ autoconf
+ autoheader
+ automake --gnu --add-missing --copy
+-)
++
+ 
+ if [ -n "$SKIP_SUBMODULE" ]; then
+     echo "Skipping submodule setup"
+diff --git a/configure.ac b/configure.ac
+index 1022808..f60e2ec 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -29,6 +29,11 @@ AM_PROG_CC_C_O
+ AC_PROG_RANLIB
+ PKG_PROG_PKG_CONFIG([0.23])
+ 
++dnl This is needed by MinGW for some reason
++m4_pattern_allow([^AC_MSG_NOTICE$])
++m4_pattern_allow([^AC_DEFINE$])
++m4_pattern_allow([^AC_MSG_WARN$])
++
+ dnl disable checks for C++, Fortran and GNU Java Compiler
+ m4_defun([_LT_AC_LANG_CXX_CONFIG], [:])
+ m4_defun([_LT_AC_LANG_F77_CONFIG], [:])
+-- 
+1.8.3.msysgit.0
+

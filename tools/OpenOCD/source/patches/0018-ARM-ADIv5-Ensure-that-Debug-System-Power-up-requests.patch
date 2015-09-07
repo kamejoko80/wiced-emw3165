@@ -1,0 +1,26 @@
+From db571582d0a18e840b21b25ac40b3cabd631dd46 Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Tue, 5 Aug 2014 09:04:24 +0100
+Subject: [PATCH 32/40] ARM ADIv5: Ensure that Debug/System Power-up-requests
+ are still active so device is not allowed to power down.
+
+---
+ src/target/adi_v5_jtag.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/target/adi_v5_jtag.c b/src/target/adi_v5_jtag.c
+index c1e1286..1c57877 100644
+--- a/src/target/adi_v5_jtag.c
++++ b/src/target/adi_v5_jtag.c
+@@ -299,7 +299,7 @@ static int jtagdp_transaction_endcheck(struct adiv5_dap *dap)
+ 			/* Clear Sticky Error Bits */
+ 			retval = adi_jtag_scan_inout_check_u32(dap, JTAG_DP_DPACC,
+ 					DP_CTRL_STAT, DPAP_WRITE,
+-					dap->dp_ctrl_stat | SSTICKYORUN
++					dap->dp_ctrl_stat |  CDBGPWRUPREQ | CSYSPWRUPREQ | SSTICKYORUN
+ 						| SSTICKYERR, NULL);
+ 			if (retval != ERROR_OK)
+ 				return retval;
+-- 
+1.8.3.msysgit.0
+

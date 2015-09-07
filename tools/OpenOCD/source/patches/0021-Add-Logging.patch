@@ -1,0 +1,113 @@
+From 39a163f98c0fda276006200cab79272d6c68515a Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Thu, 20 Nov 2014 13:52:26 +0000
+Subject: [PATCH 35/40] Add Logging
+
+---
+ src/jtag/drivers/ft2232.c |  4 ++--
+ src/rtos/ThreadX.c        | 25 +++++++++++++++++++++++++
+ 2 files changed, 27 insertions(+), 2 deletions(-)
+
+diff --git a/src/jtag/drivers/ft2232.c b/src/jtag/drivers/ft2232.c
+index 58ef6d0..8c44db5 100644
+--- a/src/jtag/drivers/ft2232.c
++++ b/src/jtag/drivers/ft2232.c
+@@ -2328,7 +2328,7 @@ static int ft2232_set_data_bits_low_byte(uint8_t value, uint8_t direction)
+ 	buf[1] = value;		/* value */
+ 	buf[2] = direction;	/* direction */
+ 
+-	LOG_DEBUG("%2.2x %2.2x %2.2x", buf[0], buf[1], buf[2]);
++//	LOG_DEBUG("%2.2x %2.2x %2.2x", buf[0], buf[1], buf[2]);
+ 
+ 	if (ft2232_write(buf, sizeof(buf), &bytes_written) != ERROR_OK) {
+ 		LOG_ERROR("couldn't initialize data bits low byte");
+@@ -2348,7 +2348,7 @@ static int ft2232_set_data_bits_high_byte(uint8_t value, uint8_t direction)
+ 	buf[1] = value;		/* value */
+ 	buf[2] = direction;	/* direction */
+ 
+-	LOG_DEBUG("%2.2x %2.2x %2.2x", buf[0], buf[1], buf[2]);
++//	LOG_DEBUG("%2.2x %2.2x %2.2x", buf[0], buf[1], buf[2]);
+ 
+ 	if (ft2232_write(buf, sizeof(buf), &bytes_written) != ERROR_OK) {
+ 		LOG_ERROR("couldn't initialize data bits high byte");
+diff --git a/src/rtos/ThreadX.c b/src/rtos/ThreadX.c
+index dd34032..4f20f1e 100644
+--- a/src/rtos/ThreadX.c
++++ b/src/rtos/ThreadX.c
+@@ -176,6 +176,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		LOG_ERROR("Could not read ThreadX thread count from target");
+ 		return retval;
+ 	}
++	LOG_DEBUG("ThreadX: %d Threads", thread_list_size );
+ 
+ 	/* wipe out previous thread details if any */
+ 	rtos_free_threadlist(rtos);
+@@ -191,6 +192,8 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		return retval;
+ 	}
+ 
++	LOG_DEBUG("ThreadX: Current thread is 0x%08X", (uint32_t)rtos->current_thread);
++
+ 	if ((thread_list_size  == 0) || (rtos->current_thread == 0)) {
+ 		/* Either : No RTOS threads - there is always at least the current execution though */
+ 		/* OR     : No current thread - all threads suspended - show the current execution
+@@ -207,6 +210,8 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		rtos->thread_details->thread_name_str = malloc(sizeof(tmp_str));
+ 		strcpy(rtos->thread_details->thread_name_str, tmp_str);
+ 
++		LOG_DEBUG("ThreadX: No RTOS threads or no current thread" );
++
+ 		if (thread_list_size == 0) {
+ 			rtos->thread_count = 1;
+ 			return ERROR_OK;
+@@ -237,6 +242,8 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		unsigned int i = 0;
+ 		int64_t name_ptr = 0;
+ 
++		LOG_DEBUG("ThreadX: Reading thread 0x%08X", (uint32_t)thread_ptr);
++
+ 		/* Save the thread pointer */
+ 		rtos->thread_details[tasks_found].threadid = thread_ptr;
+ 
+@@ -265,6 +272,8 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		if (tmp_str[0] == '\x00')
+ 			strcpy(tmp_str, "No Name");
+ 
++		LOG_DEBUG("ThreadX: Thread 0x%08X Name: %s", (uint32_t)thread_ptr, tmp_str);
++
+ 		rtos->thread_details[tasks_found].thread_name_str =
+ 			malloc(strlen(tmp_str)+1);
+ 		strcpy(rtos->thread_details[tasks_found].thread_name_str, tmp_str);
+@@ -291,6 +300,8 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		else
+ 			state_desc = "Unknown state";
+ 
++		LOG_DEBUG("ThreadX: Thread 0x%08X State: %s", (uint32_t)thread_ptr, state_desc);
++
+ 		rtos->thread_details[tasks_found].extra_info_str = malloc(strlen(
+ 					state_desc)+1);
+ 		strcpy(rtos->thread_details[tasks_found].extra_info_str, state_desc);
+@@ -299,6 +310,20 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 
+ 		rtos->thread_details[tasks_found].display_str = NULL;
+ 
++#if 1
++		/* Read the stack pointer */
++		int64_t stack_ptr = 0;
++		retval = target_read_buffer(rtos->target,
++				thread_ptr + param->thread_stack_offset,
++				param->pointer_width,
++				(uint8_t *)&stack_ptr);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Error reading stack frame from ThreadX thread");
++			return retval;
++		}
++		LOG_DEBUG("ThreadX: Thread 0x%08X Stack pointer: 0x%08x", (uint32_t)thread_ptr, (uint32_t)stack_ptr);
++#endif
++
+ 		tasks_found++;
+ 		prev_thread_ptr = thread_ptr;
+ 
+-- 
+1.8.3.msysgit.0
+

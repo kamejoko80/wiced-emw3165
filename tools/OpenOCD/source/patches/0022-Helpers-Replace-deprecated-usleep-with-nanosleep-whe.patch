@@ -1,0 +1,416 @@
+From 818a2b98ebe1cd8e13a957cceae3e9a3819496f9 Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Tue, 10 Feb 2015 17:19:55 +0000
+Subject: [PATCH 36/40] Helpers: Replace deprecated usleep with nanosleep where
+ available
+
+---
+ configure.ac                                        |  1 +
+ src/flash/nand/mx3.c                                |  2 +-
+ src/flash/nor/at91samd.c                            |  2 +-
+ src/flash/nor/fm3.c                                 |  2 +-
+ src/flash/nor/mrvlqspi.c                            |  2 +-
+ src/flash/nor/stellaris.c                           |  2 +-
+ src/helper/command.c                                |  2 +-
+ src/helper/log.c                                    |  2 +-
+ src/helper/replacements.h                           | 21 +++++++++++++++++----
+ src/jtag/aice/aice_usb.c                            |  2 +-
+ src/jtag/core.c                                     |  4 ++--
+ src/jtag/drivers/buspirate.c                        |  4 ++--
+ src/jtag/drivers/ft2232.c                           |  2 +-
+ src/jtag/drivers/jlink.c                            |  2 +-
+ src/jtag/drivers/presto.c                           |  6 +++---
+ src/jtag/drivers/stlink_usb.c                       | 12 ++++++------
+ src/jtag/drivers/ulink.c                            |  2 +-
+ .../drivers/usb_blaster/ublast2_access_libusb.c     |  2 +-
+ src/jtag/drivers/usbprog.c                          |  4 ++--
+ src/server/gdb_server.c                             |  4 ++--
+ 20 files changed, 47 insertions(+), 33 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index f60e2ec..e7e772a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -146,6 +146,7 @@ AC_CHECK_FUNCS([strndup])
+ AC_CHECK_FUNCS([strnlen])
+ AC_CHECK_FUNCS([gettimeofday])
+ AC_CHECK_FUNCS([usleep])
++AC_CHECK_FUNCS([nanosleep])
+ AC_CHECK_FUNCS([vasprintf])
+ 
+ build_bitbang=no
+diff --git a/src/flash/nand/mx3.c b/src/flash/nand/mx3.c
+index 51fa680..dac654c 100644
+--- a/src/flash/nand/mx3.c
++++ b/src/flash/nand/mx3.c
+@@ -622,7 +622,7 @@ static int poll_for_complete_op(struct target *target, const char *text)
+ {
+ 	uint16_t poll_complete_status;
+ 	for (int poll_cycle_count = 0; poll_cycle_count < 100; poll_cycle_count++) {
+-		usleep(25);
++		openocd_usleep(25);
+ 		target_read_u16(target, MX3_NF_CFG2, &poll_complete_status);
+ 		if (poll_complete_status & MX3_NF_BIT_OP_DONE)
+ 			break;
+diff --git a/src/flash/nor/at91samd.c b/src/flash/nor/at91samd.c
+index ddca137..c8c92f7 100644
+--- a/src/flash/nor/at91samd.c
++++ b/src/flash/nor/at91samd.c
+@@ -675,7 +675,7 @@ static int samd_write_row(struct flash_bank *bank, uint32_t address,
+ 		}
+ 
+ 		/* Access through AHB is stalled while flash is being programmed */
+-		usleep(200);
++		openocd_usleep(200);
+ 
+ 		error = samd_check_error(bank->target);
+ 		if (error)
+diff --git a/src/flash/nor/fm3.c b/src/flash/nor/fm3.c
+index d3d143f..315f9d1 100644
+--- a/src/flash/nor/fm3.c
++++ b/src/flash/nor/fm3.c
+@@ -187,7 +187,7 @@ static int fm3_busy_wait(struct target *target, uint32_t offset, int timeout_ms)
+ 			/* finish anyway */
+ 			break;
+ 		}
+-		usleep(1000);
++		openocd_usleep(1000);
+ 		++ms;
+ 
+ 		/* Polling time exceeded? */
+diff --git a/src/flash/nor/mrvlqspi.c b/src/flash/nor/mrvlqspi.c
+index 0dfe6f8..4d561ab 100644
+--- a/src/flash/nor/mrvlqspi.c
++++ b/src/flash/nor/mrvlqspi.c
+@@ -313,7 +313,7 @@ static int mrvlqspi_read_byte(struct flash_bank *bank, uint8_t *data)
+ 		LOG_DEBUG("status: 0x%08" PRIx32, val);
+ 		if ((val & RFIFO_EMPTY) == 0)
+ 			break;
+-		usleep(10);
++		openocd_usleep(10);
+ 	}
+ 
+ 	retval = target_read_u32(target,
+diff --git a/src/flash/nor/stellaris.c b/src/flash/nor/stellaris.c
+index 451f19b..e877541 100644
+--- a/src/flash/nor/stellaris.c
++++ b/src/flash/nor/stellaris.c
+@@ -1400,7 +1400,7 @@ COMMAND_HANDLER(stellaris_handle_recover_command)
+ 	retval = jtag_execute_queue();
+ 
+ 	/* wait 400+ msec ... OK, "1+ second" is simpler */
+-	usleep(1000);
++	openocd_usleep(1000);
+ 
+ user_action:
+ 	/* USER INTERVENTION required for the power cycle
+diff --git a/src/helper/command.c b/src/helper/command.c
+index a0aa9e8..7c2520b 100644
+--- a/src/helper/command.c
++++ b/src/helper/command.c
+@@ -1178,7 +1178,7 @@ COMMAND_HANDLER(handle_sleep_command)
+ 		long long then = timeval_ms();
+ 		while (timeval_ms() - then < (long long)duration) {
+ 			target_call_timer_callbacks_now();
+-			usleep(1000);
++			openocd_usleep(1000);
+ 		}
+ 	} else
+ 		busy_sleep(duration);
+diff --git a/src/helper/log.c b/src/helper/log.c
+index c15b95d..55dd597 100644
+--- a/src/helper/log.c
++++ b/src/helper/log.c
+@@ -453,7 +453,7 @@ void alive_sleep(uint64_t ms)
+ 		if (sleep_a_bit > napTime)
+ 			sleep_a_bit = napTime;
+ 
+-		usleep(sleep_a_bit * 1000);
++		openocd_usleep(sleep_a_bit * 1000);
+ 		keep_alive();
+ 	}
+ }
+diff --git a/src/helper/replacements.h b/src/helper/replacements.h
+index 2776602..fa8ce6c 100644
+--- a/src/helper/replacements.h
++++ b/src/helper/replacements.h
+@@ -120,9 +120,22 @@ char *strndup(const char *s, size_t n);
+ size_t strnlen(const char *s, size_t maxlen);
+ #endif	/* HAVE_STRNLEN */
+ 
+-#ifndef HAVE_USLEEP
+-#ifdef _WIN32
+-static inline unsigned usleep(unsigned int usecs)
++
++#ifdef HAVE_NANOSLEEP
++static inline unsigned openocd_usleep(unsigned int usecs)
++{
++	struct timespec sleep_ts = { .tv_sec = usecs/1000000, .tv_nsec = 1000*usecs - 1000000000*(usecs/1000000) };
++	nanosleep( &sleep_ts, &sleep_ts );
++	return 0;
++}
++#elif defined( HAVE_USLEEP )   // nanosleep missing but have usleep
++static inline unsigned openocd_usleep(unsigned int usecs)
++{
++	return usleep(usecs);
++}
++#else  /* Both nanosleep and usleep missing */
++#ifdef _WIN32   /* Fake usleep via low resolution sleep for win32 platforms */
++static inline unsigned openocd_usleep(unsigned int usecs)
+ {
+ 	Sleep((usecs/1000));
+ 	return 0;
+@@ -130,7 +143,7 @@ static inline unsigned usleep(unsigned int usecs)
+ #else
+ #error no usleep defined for your platform
+ #endif
+-#endif	/* HAVE_USLEEP */
++#endif	/* HAVE_NANOSLEEP & HAVE_USLEEP */
+ 
+ /* Windows specific */
+ #ifdef _WIN32
+diff --git a/src/jtag/aice/aice_usb.c b/src/jtag/aice/aice_usb.c
+index 50b3b9a..86d9fc4 100644
+--- a/src/jtag/aice/aice_usb.c
++++ b/src/jtag/aice/aice_usb.c
+@@ -2124,7 +2124,7 @@ static int aice_usb_open(struct aice_port_param_s *param)
+ 	 * on win32 this may take a second or two to re-enumerate */
+ 	int retval;
+ 	while ((retval = jtag_libusb_open(vids, pids, NULL, &devh)) != ERROR_OK) {
+-		usleep(1000);
++		openocd_usleep(1000);
+ 		timeout--;
+ 		if (!timeout)
+ 			break;
+diff --git a/src/jtag/core.c b/src/jtag/core.c
+index e28f802..825b216 100644
+--- a/src/jtag/core.c
++++ b/src/jtag/core.c
+@@ -850,7 +850,7 @@ void jtag_execute_queue_noclear(void)
+ 		 * or behavior when delaying after flushing the queue,
+ 		 * e.g. to simulate long roundtrip times.
+ 		 */
+-		usleep(jtag_flush_queue_sleep * 1000);
++		openocd_usleep(jtag_flush_queue_sleep * 1000);
+ 	}
+ }
+ 
+@@ -887,7 +887,7 @@ static int jtag_reset_callback(enum jtag_event event, void *priv)
+ void jtag_sleep(uint32_t us)
+ {
+ 	if (us < 1000)
+-		usleep(us);
++		openocd_usleep(us);
+ 	else
+ 		alive_sleep((us+999)/1000);
+ }
+diff --git a/src/jtag/drivers/buspirate.c b/src/jtag/drivers/buspirate.c
+index 554d3e0..aeae240 100644
+--- a/src/jtag/drivers/buspirate.c
++++ b/src/jtag/drivers/buspirate.c
+@@ -833,7 +833,7 @@ static void buspirate_jtag_enable(int fd)
+ 
+ 	LOG_DEBUG("Entering binary mode");
+ 	buspirate_serial_write(fd, tmp, 20);
+-	usleep(10000);
++	openocd_usleep(10000);
+ 
+ 	/* reads 1 to n "BBIO1"s and one "OCD1" */
+ 	while (!done) {
+@@ -880,7 +880,7 @@ static void buspirate_jtag_reset(int fd)
+ 
+ 	tmp[0] = 0x00; /* exit OCD1 mode */
+ 	buspirate_serial_write(fd, tmp, 1);
+-	usleep(10000);
++	openocd_usleep(10000);
+ 	/* We ignore the return value here purposly, nothing we can do */
+ 	buspirate_serial_read(fd, tmp, 5);
+ 	if (strncmp(tmp, "BBIO1", 5) == 0) {
+diff --git a/src/jtag/drivers/ft2232.c b/src/jtag/drivers/ft2232.c
+index 8c44db5..77b9f06 100644
+--- a/src/jtag/drivers/ft2232.c
++++ b/src/jtag/drivers/ft2232.c
+@@ -3749,7 +3749,7 @@ static int signalyzer_h_init(void)
+ 		return ERROR_JTAG_DEVICE_ERROR;
+ 	}
+ 
+-	usleep(100000);
++	openocd_usleep(100000);
+ 
+ 	status = signalyzer_h_ctrl_read(SIGNALYZER_COMMAND_ADDR, &read_buf[0]);
+ 	if (status != FT_OK) {
+diff --git a/src/jtag/drivers/jlink.c b/src/jtag/drivers/jlink.c
+index 0d58796..571426b 100644
+--- a/src/jtag/drivers/jlink.c
++++ b/src/jtag/drivers/jlink.c
+@@ -1806,7 +1806,7 @@ static struct jlink *jlink_usb_open()
+ 	 * on win32 this may take a second or two to re-enumerate */
+ 	int retval;
+ 	while ((retval = jtag_libusb_open(vids, pids, jlink_serial, &devh)) != ERROR_OK) {
+-		usleep(1000);
++		openocd_usleep(1000);
+ 		timeout--;
+ 		if (!timeout)
+ 			break;
+diff --git a/src/jtag/drivers/presto.c b/src/jtag/drivers/presto.c
+index 45e434a..3018534 100644
+--- a/src/jtag/drivers/presto.c
++++ b/src/jtag/drivers/presto.c
+@@ -245,7 +245,7 @@ static int presto_open_ftd2xx(char *req_serial)
+ 	/* delay between first write/read turnaround (after purge?) necessary
+ 	 * under Linux for unknown reason,
+ 	 * probably a bug in library threading */
+-	usleep(100000);
++	openocd_usleep(100000);
+ 	presto->status = FT_Read(presto->handle, &presto_data, 1, &ftbytes);
+ 	if (presto->status != FT_OK)
+ 		return ERROR_JTAG_DEVICE_ERROR;
+@@ -269,7 +269,7 @@ static int presto_open_ftd2xx(char *req_serial)
+ 			if (presto->status != FT_OK)
+ 				return ERROR_JTAG_DEVICE_ERROR;
+ 		}
+-		usleep(100000);
++		openocd_usleep(100000);
+ 
+ 		presto->status = FT_SetBitMode(presto->handle, 0x00, 0);
+ 		if (presto->status != FT_OK)
+@@ -286,7 +286,7 @@ static int presto_open_ftd2xx(char *req_serial)
+ 
+ 		/* delay between first write/read turnaround (after purge?) necessary under Linux for unknown reason,
+ 		   probably a bug in library threading */
+-		usleep(100000);
++		openocd_usleep(100000);
+ 		presto->status = FT_Read(presto->handle, &presto_data, 1, &ftbytes);
+ 		if (presto->status != FT_OK)
+ 			return ERROR_JTAG_DEVICE_ERROR;
+diff --git a/src/jtag/drivers/stlink_usb.c b/src/jtag/drivers/stlink_usb.c
+index e129e80..5d7a396 100644
+--- a/src/jtag/drivers/stlink_usb.c
++++ b/src/jtag/drivers/stlink_usb.c
+@@ -422,7 +422,7 @@ static int stlink_cmd_allow_retry(void *handle, const uint8_t *buf, int size)
+ 			return res;
+ 		res = stlink_usb_error_check(handle);
+ 		if (res == ERROR_WAIT && retries < MAX_WAIT_RETRIES) {
+-			usleep((1<<retries++) * 1000);
++			openocd_usleep((1<<retries++) * 1000);
+ 			continue;
+ 		}
+ 		return res;
+@@ -1418,7 +1418,7 @@ static int stlink_usb_read_mem(void *handle, uint32_t addr, uint32_t size,
+ 				uint32_t head_bytes = 4 - (addr % 4);
+ 				retval = stlink_usb_read_mem8(handle, addr, head_bytes, buffer);
+ 				if (retval == ERROR_WAIT && retries < MAX_WAIT_RETRIES) {
+-					usleep((1<<retries++) * 1000);
++					openocd_usleep((1<<retries++) * 1000);
+ 					continue;
+ 				}
+ 				if (retval != ERROR_OK)
+@@ -1437,7 +1437,7 @@ static int stlink_usb_read_mem(void *handle, uint32_t addr, uint32_t size,
+ 			retval = stlink_usb_read_mem8(handle, addr, bytes_remaining, buffer);
+ 
+ 		if (retval == ERROR_WAIT && retries < MAX_WAIT_RETRIES) {
+-			usleep((1<<retries++) * 1000);
++			openocd_usleep((1<<retries++) * 1000);
+ 			continue;
+ 		}
+ 		if (retval != ERROR_OK)
+@@ -1488,7 +1488,7 @@ static int stlink_usb_write_mem(void *handle, uint32_t addr, uint32_t size,
+ 				uint32_t head_bytes = 4 - (addr % 4);
+ 				retval = stlink_usb_write_mem8(handle, addr, head_bytes, buffer);
+ 				if (retval == ERROR_WAIT && retries < MAX_WAIT_RETRIES) {
+-					usleep((1<<retries++) * 1000);
++					openocd_usleep((1<<retries++) * 1000);
+ 					continue;
+ 				}
+ 				if (retval != ERROR_OK)
+@@ -1507,7 +1507,7 @@ static int stlink_usb_write_mem(void *handle, uint32_t addr, uint32_t size,
+ 		} else
+ 			retval = stlink_usb_write_mem8(handle, addr, bytes_remaining, buffer);
+ 		if (retval == ERROR_WAIT && retries < MAX_WAIT_RETRIES) {
+-			usleep((1<<retries++) * 1000);
++			openocd_usleep((1<<retries++) * 1000);
+ 			continue;
+ 		}
+ 		if (retval != ERROR_OK)
+@@ -1691,7 +1691,7 @@ static int stlink_usb_open(struct hl_interface_param_s *param, void **fd)
+ 			  Give the device one second to settle down and
+ 			  reenumerate.
+ 			 */
+-			usleep(1 * 1000 * 1000);
++			openocd_usleep(1 * 1000 * 1000);
+ 			retry_count--;
+ 		}
+ 	} while (1);
+diff --git a/src/jtag/drivers/ulink.c b/src/jtag/drivers/ulink.c
+index cfd693a..b98b278 100644
+--- a/src/jtag/drivers/ulink.c
++++ b/src/jtag/drivers/ulink.c
+@@ -378,7 +378,7 @@ int ulink_load_firmware_and_renumerate(struct ulink **device,
+ 	if (ret != ERROR_OK)
+ 		return ret;
+ 
+-	usleep(delay);
++	openocd_usleep(delay);
+ 
+ 	ret = ulink_usb_open(device);
+ 	if (ret != ERROR_OK)
+diff --git a/src/jtag/drivers/usb_blaster/ublast2_access_libusb.c b/src/jtag/drivers/usb_blaster/ublast2_access_libusb.c
+index ac86391..343432b 100644
+--- a/src/jtag/drivers/usb_blaster/ublast2_access_libusb.c
++++ b/src/jtag/drivers/usb_blaster/ublast2_access_libusb.c
+@@ -204,7 +204,7 @@ static int ublast2_libusb_init(struct ublast_lowlevel *low)
+ 	} else {
+ 		int retry = 10;
+ 		while (jtag_libusb_open(vids_renum, pids_renum, NULL, &low->libusb_dev) != ERROR_OK && retry--) {
+-			usleep(1000000);
++			openocd_usleep(1000000);
+ 			LOG_INFO("Waiting for renumerate...");
+ 		}
+ 
+diff --git a/src/jtag/drivers/usbprog.c b/src/jtag/drivers/usbprog.c
+index 156edf0..070edf4 100644
+--- a/src/jtag/drivers/usbprog.c
++++ b/src/jtag/drivers/usbprog.c
+@@ -447,7 +447,7 @@ static void usbprog_jtag_write_and_read(struct usbprog_jtag *usbprog_jtag, char
+ 
+ 		if (usb_bulk_write(usbprog_jtag->usb_handle, 3, tmp, 64, 1000) == 64) {
+ 			/* LOG_INFO("HALLLLOOO2 %i",(int)tmp[0]); */
+-			usleep(1);
++			openocd_usleep(1);
+ 			int timeout = 0;
+ 			while (usb_bulk_read(usbprog_jtag->usb_handle, 0x82, tmp, 64, 1000) < 1) {
+ 				timeout++;
+@@ -490,7 +490,7 @@ static void usbprog_jtag_read_tdo(struct usbprog_jtag *usbprog_jtag, char *buffe
+ 
+ 		/* LOG_INFO("HALLLLOOO3 %i",(int)tmp[0]); */
+ 		int timeout = 0;
+-		usleep(1);
++		openocd_usleep(1);
+ 		while (usb_bulk_read(usbprog_jtag->usb_handle, 0x82, tmp, 64, 10) < 1) {
+ 			timeout++;
+ 			if (timeout > 10)
+diff --git a/src/server/gdb_server.c b/src/server/gdb_server.c
+index b097f60..65cf2af 100644
+--- a/src/server/gdb_server.c
++++ b/src/server/gdb_server.c
+@@ -224,7 +224,7 @@ static int gdb_get_char_inner(struct connection *connection, int *next_char)
+ 
+ 		switch (errno) {
+ 			case WSAEWOULDBLOCK:
+-				usleep(1000);
++				openocd_usleep(1000);
+ 				break;
+ 			case WSAECONNABORTED:
+ 				gdb_con->closed = 1;
+@@ -239,7 +239,7 @@ static int gdb_get_char_inner(struct connection *connection, int *next_char)
+ #else
+ 		switch (errno) {
+ 			case EAGAIN:
+-				usleep(1000);
++				openocd_usleep(1000);
+ 				break;
+ 			case ECONNABORTED:
+ 				gdb_con->closed = 1;
+-- 
+1.8.3.msysgit.0
+

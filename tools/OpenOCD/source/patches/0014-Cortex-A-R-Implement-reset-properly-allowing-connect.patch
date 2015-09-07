@@ -1,0 +1,260 @@
+From aa5ef7429998bf0a74102d141a3f4e4b615687dc Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Thu, 26 Jun 2014 17:21:51 -0700
+Subject: [PATCH 28/40] Cortex-A/R: Implement reset properly, allowing
+ connection under SRSTn and warm reset if SRSTn is not available
+
+---
+ src/target/arm_dpm.h  |  33 +++++++++++
+ src/target/cortex_a.c | 159 +++++++++++++++++++++++++++++++++++++++++++++-----
+ 2 files changed, 177 insertions(+), 15 deletions(-)
+
+diff --git a/src/target/arm_dpm.h b/src/target/arm_dpm.h
+index 73ed1bc..6ea0b6d 100644
+--- a/src/target/arm_dpm.h
++++ b/src/target/arm_dpm.h
+@@ -198,6 +198,39 @@ void arm_dpm_report_wfar(struct arm_dpm *, uint32_t wfar);
+ #define DRCR_RESTART			(1 << 1)
+ #define DRCR_CLEAR_EXCEPTIONS	(1 << 2)
+ 
++
++/* VCR (Vector Catch Register) bits */
++#define VCR_RESET						(1 << 0)
++#define VCR_UNDEFINED					(1 << 1)
++#define VCR_SUPERVISOR_CALL				(1 << 2)
++#define VCR_PREFETCH_ABORT				(1 << 3)
++#define VCR_DATA_ABORT					(1 << 4)
++#define VCR_IRQ							(1 << 6)
++#define VCR_FIQ							(1 << 7)
++#define VCR_MONITOR_SECURE_CALL			(1 << 10)
++#define VCR_MONITOR_PREFETCH_ABORT		(1 << 11)
++#define VCR_MONITOR_DATA_ABORT			(1 << 12)
++#define VCR_MONITOR_IRQ					(1 << 14)
++#define VCR_MONITOR_FIQ					(1 << 15)
++#define VCR_HYP_UNDEFINED				(1 << 17)
++#define VCR_HYPERVISOR_CALL				(1 << 18)
++#define VCR_HYPERVISOR_PREFETCH_ABORT	(1 << 19)
++#define VCR_HYPERVISOR_DATA_ABORT		(1 << 20)
++#define VCR_HYPERVISOR_TRAP_ENTRY		(1 << 21)
++#define VCR_HYPERVISOR_IRQ				(1 << 22)
++#define VCR_HYPERVISOR_FIQ				(1 << 23)
++#define VCR_NONSEC_UNDEFINED			(1 << 25)
++#define VCR_NONSEC_SUPERVISOR_CALL		(1 << 26)
++#define VCR_NONSEC_PREFETCH_ABORT		(1 << 27)
++#define VCR_NONSEC_DATA_ABORT			(1 << 28)
++#define VCR_NONSEC_IRQ					(1 << 30)
++#define VCR_NONSEC_FIQ					(1 << 31)
++
++/* PRCR (Device Power-down and Reset Control Register) bits */
++#define PRCR_DEBUG_NO_POWER_DOWN         (1 << 0)
++#define PRCR_WARM_RESET                  (1 << 1)
++#define PRCR_HOLD_NON_DEBUG_RESET        (1 << 2)
++
+ void arm_dpm_report_dscr(struct arm_dpm *dpm, uint32_t dcsr);
+ 
+ #endif /* __ARM_DPM_H */
+diff --git a/src/target/cortex_a.c b/src/target/cortex_a.c
+index 207fb81..ea0fea1 100644
+--- a/src/target/cortex_a.c
++++ b/src/target/cortex_a.c
+@@ -55,6 +55,7 @@
+ #include "target_request.h"
+ #include "target_type.h"
+ #include "arm_opcodes.h"
++#include "jtag/interface.h"
+ #include <helper/time_support.h>
+ 
+ static int cortex_a_poll(struct target *target);
+@@ -920,6 +921,20 @@ static int cortex_a_halt(struct target *target)
+ 	struct armv7a_common *armv7a = target_to_armv7a(target);
+ 	struct adiv5_dap *swjdp = armv7a->arm.dap;
+ 
++	if (target->state == TARGET_RESET) {
++		if ((jtag_get_reset_config() & RESET_SRST_PULLS_TRST) && jtag_get_srst()) {
++			LOG_ERROR("can't request a halt while in reset if nSRST pulls nTRST");
++			return ERROR_TARGET_FAILURE;
++		} else {
++			/* we came here in a reset_halt or reset_init sequence
++			 * debug entry was already prepared in cortex_a_assert_reset()
++			 */
++			target->debug_reason = DBG_REASON_DBGRQ;
++
++			return ERROR_OK;
++		}
++	}
++
+ 	/*
+ 	 * Tell the core to be halted by writing DRCR with 0x1
+ 	 * and then wait for the core to be halted.
+@@ -1798,16 +1813,100 @@ static int cortex_a_assert_reset(struct target *target)
+ 	/* FIXME when halt is requested, make it work somehow... */
+ 
+ 	/* Issue some kind of warm reset. */
+-	if (target_has_event_action(target, TARGET_EVENT_RESET_ASSERT))
++	if (target_has_event_action(target, TARGET_EVENT_RESET_ASSERT)) {
++		/* allow scripts to override the reset event */
++
+ 		target_handle_event(target, TARGET_EVENT_RESET_ASSERT);
+-	else if (jtag_get_reset_config() & RESET_HAS_SRST) {
+-		/* REVISIT handle "pulls" cases, if there's
+-		 * hardware that needs them to work.
++		register_cache_invalidate(armv7a->arm.core_cache);
++		target->state = TARGET_RESET;
++
++		return ERROR_OK;
++	}
++
++
++	/* some cores support connecting while srst is asserted
++	 * use that mode is it has been configured */
++
++	bool srst_asserted = false;
++
++	enum reset_types jtag_reset_config = jtag_get_reset_config();
++
++	if ((jtag_reset_config & RESET_HAS_SRST) &&
++	    (jtag_reset_config & RESET_SRST_NO_GATING)) {
++		adapter_assert_reset();
++		srst_asserted = true;
++	}
++
++
++	if (!target->reset_halt) {
++		uint32_t vcr;
++
++		/* clear the reset vector catch */
++		int retval = mem_ap_sel_read_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++				armv7a->debug_base + CPUDBG_VCR, &vcr);
++		if (retval != ERROR_OK)
++			return retval;
++		retval = mem_ap_sel_write_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++				armv7a->debug_base + CPUDBG_VCR, vcr & (~VCR_RESET) );
++		if (retval != ERROR_OK)
++			return retval;
++
++		/* Set restart bit in DRCR to ensure resume processor resumes if it was currently halted */
++		retval = mem_ap_sel_write_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++				armv7a->debug_base + CPUDBG_DRCR, DRCR_RESTART);
++		if (retval != ERROR_OK)
++			return retval;
++
++
++	} else {
++		uint32_t vcr;
++		uint32_t dscr;
++
++		/*
++		 * enter halting debug mode
++		 */
++		int retval = mem_ap_sel_read_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++				armv7a->debug_base + CPUDBG_DSCR, &dscr);
++		if (retval != ERROR_OK)
++			return retval;
++
++		retval = mem_ap_sel_write_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++				armv7a->debug_base + CPUDBG_DSCR, dscr | DSCR_HALT_DBG_MODE);
++		if (retval != ERROR_OK)
++			return retval;
++
++		/* set the reset vector catch */
++		retval = mem_ap_sel_read_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++				armv7a->debug_base + CPUDBG_VCR, &vcr);
++		if (retval != ERROR_OK)
++			return retval;
++		retval = mem_ap_sel_write_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++				armv7a->debug_base + CPUDBG_VCR, vcr | VCR_RESET  );
++		if (retval != ERROR_OK)
++			return retval;
++
++		/*
++		 * Tell the core to be halted by writing DRCR with 0x1
+ 		 */
+-		jtag_add_reset(0, 1);
++		retval = mem_ap_sel_write_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++				armv7a->debug_base + CPUDBG_DRCR, DRCR_HALT);
++		if (retval != ERROR_OK)
++			return retval;
++	}
++
++	if (jtag_reset_config & RESET_HAS_SRST) {
++			/* default to asserting srst */
++			if (!srst_asserted)
++				adapter_assert_reset();
++
+ 	} else {
+-		LOG_ERROR("%s: how to reset?", target_name(target));
+-		return ERROR_FAIL;
++
++		LOG_DEBUG("%s: Executing a warm reset", target_name(target));
++		/* execute warm reset */
++		int retval = mem_ap_sel_write_atomic_u32( &armv7a->dap, armv7a->debug_ap,
++				armv7a->debug_base + CPUDBG_PRCR, PRCR_WARM_RESET | PRCR_HOLD_NON_DEBUG_RESET );
++
++		return retval;
+ 	}
+ 
+ 	/* registers are now invalid */
+@@ -1825,22 +1924,52 @@ static int cortex_a_deassert_reset(struct target *target)
+ 	LOG_DEBUG(" ");
+ 
+ 	/* be certain SRST is off */
+-	jtag_add_reset(0, 0);
+ 
+-	retval = cortex_a_poll(target);
+-	if (retval != ERROR_OK)
+-		return retval;
++	adapter_deassert_reset();
++
++	enum reset_types jtag_reset_config = jtag_get_reset_config();
++	LOG_WARNING("jtag_reset_config=0x%x", jtag_reset_config );
++
++	struct armv7a_common *armv7a = target_to_armv7a(target);
+ 
+ 	if (target->reset_halt) {
+-		if (target->state != TARGET_HALTED) {
+-			LOG_WARNING("%s: ran after reset and before halt ...",
+-				target_name(target));
+-			retval = target_halt(target);
++		if (jtag_reset_config & RESET_HAS_SRST) {
++			uint32_t vcr;
++			/* clear the reset vector catch */
++			retval = mem_ap_sel_read_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++					armv7a->debug_base + CPUDBG_VCR, &vcr);
++			if (retval != ERROR_OK)
++				return retval;
++			retval = mem_ap_sel_write_atomic_u32(&armv7a->dap, armv7a->debug_ap,
++					armv7a->debug_base + CPUDBG_VCR, vcr & (~VCR_RESET) );
+ 			if (retval != ERROR_OK)
+ 				return retval;
+ 		}
++		else
++		{
++			/* clear warm reset */
++			retval = mem_ap_sel_write_atomic_u32( &armv7a->dap, armv7a->debug_ap,
++					armv7a->debug_base + CPUDBG_PRCR, 0 );
++
++			if (retval != ERROR_OK)
++				return retval;
++
++			LOG_DEBUG("%s: Clearing warm reset", target_name(target));
++
++			if (target->state != TARGET_HALTED) {
++				LOG_WARNING("%s: ran after reset and before halt ...",
++					target_name(target));
++				retval = target_halt(target);
++				if (retval != ERROR_OK)
++					return retval;
++			}
++		}
+ 	}
+ 
++	retval = cortex_a_poll(target);
++	if (retval != ERROR_OK)
++		return retval;
++
+ 	return ERROR_OK;
+ }
+ 
+-- 
+1.8.3.msysgit.0
+

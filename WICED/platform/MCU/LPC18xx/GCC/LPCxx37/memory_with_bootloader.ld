@@ -1,0 +1,7 @@
+/* * Copyright 2015, Broadcom Corporation
+ * All Rights Reserved.
+ *
+ * This is UNPUBLISHED PROPRIETARY SOURCE CODE of Broadcom Corporation;
+ * the contents of this file may not be disclosed to third parties, copied
+ * or duplicated in any form, in whole or in part, without the prior
+ * written permission of Broadcom Corporation. */MEMORY{    BTLDR_VECTORS(rx) : ORIGIN = 0x1A000000, LENGTH = 512    CODE_READ_PROTECTION_A(rx) : ORIGIN = 0x1A0002FC, LENGTH = 4        SHARED_API(rx) : ORIGIN = 0x1A000300, LENGTH = 512    BTLDR_CODE(rx) : ORIGIN = 0x1A000500, LENGTH = 15K    DCT1_FLASH(rx) : ORIGIN = 0x1A004000, LENGTH = 16K     /* align DCT to sector boundary */    DCT2_FLASH(rx) : ORIGIN = 0x1A008000, LENGTH = 16K     /* align DCT align to sector boundary */    APP_CODE_A(rx) : ORIGIN = 0x1A00C000, LENGTH = 475135  /* align start address of the app to sector boundary */    /* End address of the BANK A is 0x1A07FFFF */        APP_CODE_B(rx) : ORIGIN = 0x1B000000, LENGTH = 524287    /* End address of the BANK A is 0x1B07FFFF */        CODE_READ_PROTECTION_B(rx) : ORIGIN = 0x1B0002FC, LENGTH = 4    SRAM_FAST(rwx) : ORIGIN = 0x10000000,  LENGTH = 32K    SRAM_DATA(rwx) : ORIGIN = 0x10080000,  LENGTH = 40K    SRAM_STACK(rwx) : ORIGIN = 0x20000000, LENGTH = 32K}

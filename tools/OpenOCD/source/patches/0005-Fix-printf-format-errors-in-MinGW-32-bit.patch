@@ -1,0 +1,402 @@
+From 5b5d3c19d83b1952f85a0e3722bd3936929bb27f Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Tue, 15 Apr 2014 17:20:53 +0100
+Subject: [PATCH 19/40] Fix printf format errors in MinGW 32-bit
+
+Change-Id: I0e86bd333c21a318af109f876917ea65ee550d1c
+---
+ src/helper/ioutil.c     |  2 +-
+ src/helper/log.h        | 28 ++++++++++++++++++++++++++--
+ src/jtag/core.c         | 12 +++++++-----
+ src/rtos/FreeRTOS.c     | 22 +++++++++++-----------
+ src/rtos/linux.c        | 10 +++++-----
+ src/rtos/mqx.c          |  2 +-
+ src/rtos/rtos.c         |  6 +++---
+ src/target/image.c      |  2 +-
+ src/target/lakemont.c   |  8 ++++----
+ src/target/oocd_trace.c |  4 ++--
+ src/target/target.c     |  8 ++++----
+ 11 files changed, 65 insertions(+), 39 deletions(-)
+
+diff --git a/src/helper/ioutil.c b/src/helper/ioutil.c
+index 5531900..d7c7883 100644
+--- a/src/helper/ioutil.c
++++ b/src/helper/ioutil.c
+@@ -219,7 +219,7 @@ COMMAND_HANDLER(handle_cp_command)
+ 		if (retval != ERROR_OK)
+ 			break;
+ 
+-		command_print(CMD_CTX, "%zu", len - pos);
++		command_print(CMD_CTX, "%" PRIzu, len - pos);
+ 
+ 		pos += chunk;
+ 
+diff --git a/src/helper/log.h b/src/helper/log.h
+index 7f9f32c..eddc69c 100644
+--- a/src/helper/log.h
++++ b/src/helper/log.h
+@@ -34,9 +34,33 @@
+  */
+ #if (defined(IS_MINGW) && (((__GNUC__ << 16) + __GNUC_MINOR__) >= 0x00040004))
+ #define PRINTF_ATTRIBUTE_FORMAT gnu_printf
+-#else
++#define PRIzi "zi"
++#define PRIzu "zu"
++#define PRIzx "zx"
++#define PRIzd "zd"
++#define LOG_PRIx64 "llx"
++#define LOG_PRId64 "lld"
++#define LOG_PRIu64 "llu"
++#elif defined(IS_MINGW)
+ #define PRINTF_ATTRIBUTE_FORMAT printf
+-#endif
++#define PRIzi "Ii"
++#define PRIzu "Iu"
++#define PRIzx "Ix"
++#define PRIzd "Id"
++#define LOG_PRIx64 PRIx64
++#define LOG_PRId64 PRId64
++#define LOG_PRIu64 PRIu64
++ #else
++ #define PRINTF_ATTRIBUTE_FORMAT printf
++#define PRIzi "zi"
++#define PRIzu "zu"
++#define PRIzx "zx"
++#define PRIzd "zd"
++#define LOG_PRIx64 PRIx64
++#define LOG_PRId64 PRId64
++#define LOG_PRIu64 PRIu64
++ #endif
++
+ 
+ /* logging priorities
+  * LOG_LVL_SILENT - turn off all output. In lieu of try + catch this can be used as a
+diff --git a/src/jtag/core.c b/src/jtag/core.c
+index 74c2731..a82e2b1 100644
+--- a/src/jtag/core.c
++++ b/src/jtag/core.c
+@@ -1234,16 +1234,18 @@ static int jtag_validate_ircapture(void)
+ 		 */
+ 		val = buf_get_u64(ir_test, chain_pos, tap->ir_length);
+ 		if ((val & tap->ir_capture_mask) != tap->ir_capture_value) {
+-			LOG_ERROR("%s: IR capture error; saw 0x%0*" PRIx64 " not 0x%0*" PRIx32,
++			LOG_ERROR("%s: IR capture error; saw 0x%0*" LOG_PRIx64 " not 0x%0*" PRIx32,
+ 				jtag_tap_name(tap),
+-				(tap->ir_length + 7) / tap->ir_length, val,
+-				(tap->ir_length + 7) / tap->ir_length, tap->ir_capture_value);
++				(tap->ir_length + 7) / tap->ir_length,
++				(uint64_t) val,
++				(tap->ir_length + 7) / tap->ir_length,
++				(unsigned) tap->ir_capture_value);
+ 
+ 			retval = ERROR_JTAG_INIT_FAILED;
+ 			goto done;
+ 		}
+-		LOG_DEBUG("%s: IR capture 0x%0*" PRIx64, jtag_tap_name(tap),
+-			(tap->ir_length + 7) / tap->ir_length, val);
++		LOG_DEBUG("%s: IR capture 0x%0*" LOG_PRIx64, jtag_tap_name(tap),
++			(tap->ir_length + 7) / tap->ir_length, (uint64_t) val);
+ 		chain_pos += tap->ir_length;
+ 	}
+ 
+diff --git a/src/rtos/FreeRTOS.c b/src/rtos/FreeRTOS.c
+index 1ce6807..1418207 100644
+--- a/src/rtos/FreeRTOS.c
++++ b/src/rtos/FreeRTOS.c
+@@ -171,7 +171,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 			rtos->symbols[FreeRTOS_VAL_uxCurrentNumberOfTasks].address,
+ 			param->thread_count_width,
+ 			(uint8_t *)&thread_list_size);
+-	LOG_DEBUG("FreeRTOS: Read uxCurrentNumberOfTasks at 0x%" PRIx64 ", value %d\r\n",
++	LOG_DEBUG("FreeRTOS: Read uxCurrentNumberOfTasks at 0x%" LOG_PRIx64 ", value %d\r\n",
+ 										rtos->symbols[FreeRTOS_VAL_uxCurrentNumberOfTasks].address,
+ 										thread_list_size);
+ 
+@@ -192,7 +192,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 		LOG_ERROR("Error reading current thread in FreeRTOS thread list");
+ 		return retval;
+ 	}
+-	LOG_DEBUG("FreeRTOS: Read pxCurrentTCB at 0x%" PRIx64 ", value 0x%" PRIx64 "\r\n",
++	LOG_DEBUG("FreeRTOS: Read pxCurrentTCB at 0x%" LOG_PRIx64 ", value 0x%" LOG_PRIx64 "\r\n",
+ 										rtos->symbols[FreeRTOS_VAL_pxCurrentTCB].address,
+ 										rtos->current_thread);
+ 
+@@ -242,11 +242,11 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 			(uint8_t *)&max_used_priority);
+ 	if (retval != ERROR_OK)
+ 		return retval;
+-	LOG_DEBUG("FreeRTOS: Read uxTopUsedPriority at 0x%" PRIx64 ", value %" PRId64 "\r\n",
++	LOG_DEBUG("FreeRTOS: Read uxTopUsedPriority at 0x%" LOG_PRIx64 ", value %" LOG_PRId64 "\r\n",
+ 										rtos->symbols[FreeRTOS_VAL_uxTopUsedPriority].address,
+ 										max_used_priority);
+ 	if (max_used_priority > FREERTOS_MAX_PRIORITIES) {
+-		LOG_ERROR("FreeRTOS maximum used priority is unreasonably big, not proceeding: %" PRId64 "",
++		LOG_ERROR("FreeRTOS maximum used priority is unreasonably big, not proceeding: %" LOG_PRId64 "",
+ 			max_used_priority);
+ 		return ERROR_FAIL;
+ 	}
+@@ -255,7 +255,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 		malloc(sizeof(symbol_address_t) *
+ 			(max_used_priority+1 + 5));
+ 	if (!list_of_lists) {
+-		LOG_ERROR("Error allocating memory for %" PRId64 " priorities", max_used_priority);
++		LOG_ERROR("Error allocating memory for %" LOG_PRId64 " priorities", max_used_priority);
+ 		return ERROR_FAIL;
+ 	}
+ 
+@@ -285,7 +285,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 			free(list_of_lists);
+ 			return retval;
+ 		}
+-		LOG_DEBUG("FreeRTOS: Read thread count for list %d at 0x%" PRIx64 ", value %" PRId64 "\r\n",
++		LOG_DEBUG("FreeRTOS: Read thread count for list %d at 0x%" LOG_PRIx64 ", value %" LOG_PRId64 "\r\n",
+ 										i, list_of_lists[i], list_thread_count);
+ 
+ 		if (list_thread_count == 0)
+@@ -303,7 +303,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 			free(list_of_lists);
+ 			return retval;
+ 		}
+-		LOG_DEBUG("FreeRTOS: Read first item for list %d at 0x%" PRIx64 ", value 0x%" PRIx64 "\r\n",
++		LOG_DEBUG("FreeRTOS: Read first item for list %d at 0x%" LOG_PRIx64 ", value 0x%" LOG_PRIx64 "\r\n",
+ 										i, list_of_lists[i] + param->list_next_offset, list_elem_ptr);
+ 
+ 		while ((list_thread_count > 0) && (list_elem_ptr != 0) &&
+@@ -320,7 +320,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 				free(list_of_lists);
+ 				return retval;
+ 			}
+-			LOG_DEBUG("FreeRTOS: Read Thread ID at 0x%" PRIx64 ", value 0x%" PRIx64 "\r\n",
++			LOG_DEBUG("FreeRTOS: Read Thread ID at 0x%" LOG_PRIx64 ", value 0x%" LOG_PRIx64 "\r\n",
+ 										list_elem_ptr + param->list_elem_content_offset,
+ 										rtos->thread_details[tasks_found].threadid);
+ 
+@@ -340,7 +340,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 				return retval;
+ 			}
+ 			tmp_str[FREERTOS_THREAD_NAME_STR_SIZE-1] = '\x00';
+-			LOG_DEBUG("FreeRTOS: Read Thread Name at 0x%" PRIx64 ", value \"%s\"\r\n",
++			LOG_DEBUG("FreeRTOS: Read Thread Name at 0x%" LOG_PRIx64 ", value \"%s\"\r\n",
+ 										rtos->thread_details[tasks_found].threadid + param->thread_name_offset,
+ 										tmp_str);
+ 
+@@ -376,7 +376,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 				free(list_of_lists);
+ 				return retval;
+ 			}
+-			LOG_DEBUG("FreeRTOS: Read next thread location at 0x%" PRIx64 ", value 0x%" PRIx64 "\r\n",
++			LOG_DEBUG("FreeRTOS: Read next thread location at 0x%" LOG_PRIx64 ", value 0x%" LOG_PRIx64 "\r\n",
+ 										prev_list_elem_ptr + param->list_elem_next_offset,
+ 										list_elem_ptr);
+ 		}
+@@ -414,7 +414,7 @@ static int FreeRTOS_get_thread_reg_list(struct rtos *rtos, int64_t thread_id, ch
+ 		LOG_ERROR("Error reading stack frame from FreeRTOS thread");
+ 		return retval;
+ 	}
+-	LOG_DEBUG("FreeRTOS: Read stack pointer at 0x%" PRIx64 ", value 0x%" PRIx64 "\r\n",
++	LOG_DEBUG("FreeRTOS: Read stack pointer at 0x%" LOG_PRIx64 ", value 0x%" LOG_PRIx64 "\r\n",
+ 										thread_id + param->thread_stack_offset,
+ 										stack_ptr);
+ 
+diff --git a/src/rtos/linux.c b/src/rtos/linux.c
+index c28236d..f8c7d2a 100644
+--- a/src/rtos/linux.c
++++ b/src/rtos/linux.c
+@@ -27,8 +27,8 @@
+ #include <jtag/jtag.h>
+ #include "target/target.h"
+ #include "target/target_type.h"
+-#include "helper/log.h"
+ #include "helper/types.h"
++#include "helper/log.h"
+ #include "rtos.h"
+ #include "rtos_standard_stackings.h"
+ #include <target/register.h>
+@@ -217,7 +217,7 @@ static int linux_os_thread_reg_list(struct rtos *rtos,
+ 		if (found == 0) {
+ 			LOG_ERROR
+ 			(
+-				"current thread %" PRIx64 ": no target to perform access of core id %" PRIx32,
++				"current thread %" LOG_PRIx64 ": no target to perform access of core id %" PRIx32,
+ 				thread_id,
+ 				next->core_id);
+ 			return ERROR_FAIL;
+@@ -699,7 +699,7 @@ struct current_thread *add_current_thread(struct current_thread *currents,
+ struct threads *liste_del_task(struct threads *task_list, struct threads **t,
+ 	struct threads *prev)
+ {
+-	LOG_INFO("del task %" PRId64, (*t)->threadid);
++	LOG_INFO("del task %" LOG_PRId64, (*t)->threadid);
+ 	prev->next = (*t)->next;
+ 
+ 	if (prev == task_list)
+@@ -839,7 +839,7 @@ int linux_get_tasks(struct target *target, int context)
+ 	linux_os->preupdtate_threadid_count = linux_os->threadid_count - 1;
+ 	/*  check that all current threads have been identified  */
+ 
+-	LOG_INFO("complete time %" PRId64 ", thread mean %" PRId64 "\n",
++	LOG_INFO("complete time %" LOG_PRId64 ", thread mean %" LOG_PRId64 "\n",
+ 		(timeval_ms() - start),
+ 		(timeval_ms() - start) / linux_os->threadid_count);
+ 
+@@ -1109,7 +1109,7 @@ static int linux_task_update(struct target *target, int context)
+ 			t->base_addr = next_task(target, t);
+ 	}
+ 
+-	LOG_INFO("update thread done %" PRId64 ", mean%" PRId64 "\n",
++	LOG_INFO("update thread done %" LOG_PRId64 ", mean%" LOG_PRId64 "\n",
+ 		(timeval_ms() - start), (timeval_ms() - start) / loop);
+ 	free(t);
+ 	linux_os->threads_needs_update = 0;
+diff --git a/src/rtos/mqx.c b/src/rtos/mqx.c
+index 0ba462c..e9306c9 100644
+--- a/src/rtos/mqx.c
++++ b/src/rtos/mqx.c
+@@ -527,7 +527,7 @@ static int mqx_get_thread_reg_list(
+ 		}
+ 	}
+ 	if (!my_task_addr) {
+-		LOG_ERROR("MQX_RTOS - threadid %" PRId64 " does not match any task", thread_id);
++		LOG_ERROR("MQX_RTOS - threadid %" LOG_PRId64 " does not match any task", thread_id);
+ 		return ERROR_FAIL;
+ 	}
+ 	/* get task stack head address */
+diff --git a/src/rtos/rtos.c b/src/rtos/rtos.c
+index 3420d06..684f60d 100644
+--- a/src/rtos/rtos.c
++++ b/src/rtos/rtos.c
+@@ -408,7 +408,7 @@ int rtos_thread_packet(struct connection *connection, char const *packet, int pa
+ 					 * all other operations ) */
+ 		if ((packet[1] == 'g') && (target->rtos != NULL)) {
+ 			sscanf(packet, "Hg%16" SCNx64, &target->rtos->current_threadid);
+-			LOG_DEBUG("RTOS: GDB requested to set current thread to 0x%" PRIx64 "\r\n",
++			LOG_DEBUG("RTOS: GDB requested to set current thread to 0x%" LOG_PRIx64 "\r\n",
+ 										target->rtos->current_threadid);
+ 		}
+ 		gdb_put_packet(connection, "OK", 2);
+@@ -428,8 +428,8 @@ int rtos_get_gdb_reg_list(struct connection *connection)
+ 			(target->smp))) {	/* in smp several current thread are possible */
+ 		char *hex_reg_list;
+ 
+-		LOG_DEBUG("RTOS: getting register list for thread 0x%" PRIx64
+-				  ", target->rtos->current_thread=0x%" PRIx64 "\r\n",
++		LOG_DEBUG("RTOS: getting register list for thread 0x%" LOG_PRIx64
++				  ", target->rtos->current_thread=0x%" LOG_PRIx64 "\r\n",
+ 										current_threadid,
+ 										target->rtos->current_thread);
+ 
+diff --git a/src/target/image.c b/src/target/image.c
+index b1b7e3a..3c0918b 100644
+--- a/src/target/image.c
++++ b/src/target/image.c
+@@ -483,7 +483,7 @@ static int image_elf_read_section(struct image *image,
+ 	if (offset < field32(elf, segment->p_filesz)) {
+ 		/* maximal size present in file for the current segment */
+ 		read_size = MIN(size, field32(elf, segment->p_filesz) - offset);
+-		LOG_DEBUG("read elf: size = 0x%zu at 0x%" PRIx32 "", read_size,
++		LOG_DEBUG("read elf: size = 0x%" PRIzu " at 0x%" PRIx32 "", read_size,
+ 			field32(elf, segment->p_offset) + offset);
+ 		/* read initialized area of the segment */
+ 		retval = fileio_seek(&elf->fileio, field32(elf, segment->p_offset) + offset);
+diff --git a/src/target/lakemont.c b/src/target/lakemont.c
+index 17b0c12..3499c4b 100644
+--- a/src/target/lakemont.c
++++ b/src/target/lakemont.c
+@@ -653,7 +653,7 @@ static int read_hw_reg(struct target *t, int reg, uint32_t *regval, uint8_t cach
+ 		x86_32->cache->reg_list[reg].valid = 1;
+ 		x86_32->cache->reg_list[reg].dirty = 0;
+ 	}
+-	LOG_DEBUG("reg=%s, op=0x%016" PRIx64 ", val=0x%08" PRIx32,
++	LOG_DEBUG("reg=%s, op=0x%016" LOG_PRIx64 ", val=0x%08" PRIx32,
+ 			x86_32->cache->reg_list[reg].name,
+ 			arch_info->op,
+ 			*regval);
+@@ -671,7 +671,7 @@ static int write_hw_reg(struct target *t, int reg, uint32_t regval, uint8_t cach
+ 	if (cache)
+ 		regval = buf_get_u32(x86_32->cache->reg_list[reg].value, 0, 32);
+ 	buf_set_u32(reg_buf, 0, 32, regval);
+-	LOG_DEBUG("reg=%s, op=0x%016" PRIx64 ", val=0x%08" PRIx32,
++	LOG_DEBUG("reg=%s, op=0x%016" LOG_PRIx64 ", val=0x%08" PRIx32,
+ 			x86_32->cache->reg_list[reg].name,
+ 			arch_info->op,
+ 			regval);
+@@ -770,7 +770,7 @@ static int submit_instruction(struct target *t, int num)
+ 
+ static int submit_reg_pir(struct target *t, int num)
+ {
+-	LOG_DEBUG("reg %s op=0x%016" PRIx64, regs[num].name, regs[num].op);
++	LOG_DEBUG("reg %s op=0x%016" LOG_PRIx64, regs[num].name, regs[num].op);
+ 	int err = submit_pir(t, regs[num].op);
+ 	if (err != ERROR_OK) {
+ 		LOG_ERROR("%s error submitting pir", __func__);
+@@ -781,7 +781,7 @@ static int submit_reg_pir(struct target *t, int num)
+ 
+ static int submit_instruction_pir(struct target *t, int num)
+ {
+-	LOG_DEBUG("%s op=0x%016" PRIx64, instructions[num].name,
++	LOG_DEBUG("%s op=0x%016" LOG_PRIx64, instructions[num].name,
+ 			instructions[num].op);
+ 	int err = submit_pir(t, instructions[num].op);
+ 	if (err != ERROR_OK) {
+diff --git a/src/target/oocd_trace.c b/src/target/oocd_trace.c
+index e723efe..34784fb 100644
+--- a/src/target/oocd_trace.c
++++ b/src/target/oocd_trace.c
+@@ -91,7 +91,7 @@ static int oocd_trace_read_memory(struct oocd_trace *oocd_trace, uint8_t *data,
+ 		bytes_read = read(oocd_trace->tty_fd,
+ 				((uint8_t *)data) + (size * 16) - bytes_to_read, bytes_to_read);
+ 		if (bytes_read < 0)
+-			LOG_DEBUG("read() returned %zi (%s)", bytes_read, strerror(errno));
++			LOG_DEBUG("read() returned %" PRIzi " (%s)", bytes_read, strerror(errno));
+ 		else
+ 			bytes_to_read -= bytes_read;
+ 	}
+@@ -140,7 +140,7 @@ static int oocd_trace_init(struct etm_context *etm_ctx)
+ 	do {
+ 		bytes_read = read(oocd_trace->tty_fd, trash, sizeof(trash));
+ 		if (bytes_read)
+-			LOG_DEBUG("%zi bytes read", bytes_read);
++			LOG_DEBUG("%" PRIzi " bytes read", bytes_read);
+ 	} while (bytes_read > 0);
+ 
+ 	return ERROR_OK;
+diff --git a/src/target/target.c b/src/target/target.c
+index 796a263..16005f1 100644
+--- a/src/target/target.c
++++ b/src/target/target.c
+@@ -2150,12 +2150,12 @@ int target_read_u64(struct target *target, uint64_t address, uint64_t *value)
+ 
+ 	if (retval == ERROR_OK) {
+ 		*value = target_buffer_get_u64(target, value_buf);
+-		LOG_DEBUG("address: 0x%" PRIx64 ", value: 0x%16.16" PRIx64 "",
++		LOG_DEBUG("address: 0x%" LOG_PRIx64 ", value: 0x%16.16" LOG_PRIx64 "",
+ 				  address,
+ 				  *value);
+ 	} else {
+ 		*value = 0x0;
+-		LOG_DEBUG("address: 0x%" PRIx64 " failed",
++		LOG_DEBUG("address: 0x%" LOG_PRIx64 " failed",
+ 				  address);
+ 	}
+ 
+@@ -2241,7 +2241,7 @@ int target_write_u64(struct target *target, uint64_t address, uint64_t value)
+ 		return ERROR_FAIL;
+ 	}
+ 
+-	LOG_DEBUG("address: 0x%" PRIx64 ", value: 0x%16.16" PRIx64 "",
++	LOG_DEBUG("address: 0x%" LOG_PRIx64 ", value: 0x%16.16" LOG_PRIx64 "",
+ 			  address,
+ 			  value);
+ 
+@@ -3636,7 +3636,7 @@ static void writeData(FILE *f, const void *data, size_t len)
+ {
+ 	size_t written = fwrite(data, 1, len, f);
+ 	if (written != len)
+-		LOG_ERROR("failed to write %zu bytes: %s", len, strerror(errno));
++		LOG_ERROR("failed to write %" PRIzu " bytes: %s", len, strerror(errno));
+ }
+ 
+ static void writeLong(FILE *f, int l, struct target *target)
+-- 
+1.8.3.msysgit.0
+

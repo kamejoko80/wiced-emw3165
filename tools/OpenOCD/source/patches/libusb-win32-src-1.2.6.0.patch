@@ -1,0 +1,189 @@
+diff -Naur libusb-win32-src-1.2.6.0/Makefile libusb-win32-src-1.2.6.0_fixed/Makefile
+--- libusb-win32-src-1.2.6.0/Makefile	2011-07-07 16:22:58 +0100
++++ libusb-win32-src-1.2.6.0_fixed/Makefile	2014-04-17 10:05:10 +0100
+@@ -61,6 +61,7 @@
+ TARGET = libusb
+ DLL_TARGET = $(TARGET)0
+ LIB_TARGET = $(TARGET)
++STATIC_LIB_TARGET = $(TARGET)
+ DRIVER_TARGET = $(TARGET)0.sys
+ INSTALL_DIR = /usr
+ VPATH = .:./src:./src/driver:./tests
+@@ -141,6 +142,16 @@
+ %.2.o: %.rc
+ 	$(WINDRES) $(CPPFLAGS) $(WINDRES_FLAGS) $< -o $@
+ 
++static_lib: STATIC_ARFLAGS = -rcs
++static_lib: STATIC_CFLAGS = $(CFLAGS) -DLOG_APPNAME=\"$(STATIC_TARGET)-a\" -DTARGETTYPE=STATICLINK
++static_lib: $(STATIC_LIB_TARGET).a
++
++$(STATIC_LIB_TARGET).a: usb.22.o error.22.o descriptors.22.o windows.22.o install.22.o registry.22.o resource.2.o
++	$(AR) $(STATIC_ARFLAGS) $@ $^
++
++%.22.o: %.c libusb_driver.h driver_api.h error.h
++	$(CC) $(STATIC_CFLAGS) -c $< -o $@ $(CPPFLAGS) $(INCLUDES) 
++
+ .PHONY: filter
+ filter: FILTER_CFLAGS = $(CFLAGS) -DLOG_APPNAME=\"install-filter\" -DTARGETTYPE=PROGRAMconsole -DLOG_STYLE_SHORT
+ filter: FILTER_LDFLAGS = -s -L. -lgdi32 -luser32 -lcfgmgr32 -lsetupapi
+diff -Naur libusb-win32-src-1.2.6.0/src/driver/driver_api.h libusb-win32-src-1.2.6.0_fixed/src/driver/driver_api.h
+--- libusb-win32-src-1.2.6.0/src/driver/driver_api.h	2011-07-23 21:11:26 +0100
++++ libusb-win32-src-1.2.6.0_fixed/src/driver/driver_api.h	2014-04-17 10:10:54 +0100
+@@ -271,7 +271,9 @@
+ } libusb_request;
+ */
+ 
++#ifdef _MSC_VER
+ #pragma warning(disable:4201)
++#endif
+ 
+ typedef struct
+ {
+@@ -393,7 +395,10 @@
+ 		} control;
+ 	};
+ } libusb_request;
++
++#ifdef _MSC_VER
+ #pragma warning(default:4201)
++#endif
+ 
+ #include <poppack.h>
+ 
+diff -Naur libusb-win32-src-1.2.6.0/src/install.c libusb-win32-src-1.2.6.0_fixed/src/install.c
+--- libusb-win32-src-1.2.6.0/src/install.c	2011-10-28 14:34:08 +0100
++++ libusb-win32-src-1.2.6.0_fixed/src/install.c	2014-04-17 10:05:48 +0100
+@@ -316,7 +316,6 @@
+ static HINSTANCE riched32_dll = NULL;
+ static HINSTANCE shell32_dll = NULL;
+ static HINSTANCE msimg32_dll = NULL;
+-static HINSTANCE gdi32_dll = NULL;
+ 
+ static HINSTANCE advapi32_dll = NULL;
+ 
+diff -Naur libusb-win32-src-1.2.6.0/src/registry.c libusb-win32-src-1.2.6.0_fixed/src/registry.c
+--- libusb-win32-src-1.2.6.0/src/registry.c	2010-09-23 17:40:50 +0100
++++ libusb-win32-src-1.2.6.0_fixed/src/registry.c	2014-04-17 10:05:39 +0100
+@@ -90,8 +90,6 @@
+ {
+ 	DWORD reg_type;
+ 	DWORD length = size;
+-	char *p = NULL;
+-	HKEY reg_key = NULL;
+ 
+ 	memset(buf, 0, size);
+ 
+@@ -567,15 +565,12 @@
+ 	SP_DEVINFO_DATA dev_info_data;
+ 	int dev_index = 0;
+ 	char hwid[MAX_PATH];
+-	const char *driver_name;
+ 	filter_device_t* found;
+ 	bool_t is_libusb_service;
+ 
+ 	if (!filter_context->device_filters)
+ 		return TRUE;
+ 
+-	driver_name = USB_GET_DRIVER_NAME();
+-
+ 	dev_info_data.cbSize = sizeof(SP_DEVINFO_DATA);
+ 	dev_index = 0;
+ 
+@@ -871,7 +866,7 @@
+ 		== ERROR_SUCCESS)
+ 	{
+ 		if (RegQueryValueEx(reg_key, value, NULL, &reg_type,
+-			buf, &reg_length) == ERROR_SUCCESS)
++			(unsigned char*)buf, &reg_length) == ERROR_SUCCESS)
+ 		{
+ 			if (reg_type == REG_SZ)
+ 			{
+@@ -928,7 +923,7 @@
+ 		{
+ 			if (usb_registry_is_nt())
+ 			{
+-				if (RegSetValueEx(reg_key, value, 0, REG_MULTI_SZ, buf, size)
++				if (RegSetValueEx(reg_key, value, 0, REG_MULTI_SZ, (unsigned char*)buf, size)
+ 					== ERROR_SUCCESS)
+ 				{
+ 					ret = TRUE;
+@@ -936,7 +931,7 @@
+ 			}
+ 			else
+ 			{
+-				if (RegSetValueEx(reg_key, value, 0, REG_SZ, buf, size)
++				if (RegSetValueEx(reg_key, value, 0, REG_SZ, (unsigned char*)buf, size)
+ 					== ERROR_SUCCESS)
+ 				{
+ 					ret = TRUE;
+@@ -1064,7 +1059,7 @@
+ 	}
+ 	while (1);
+ 
+-	return TRUE;
++	return ret;
+ }
+ 
+ void usb_registry_mz_string_lower(char *src)
+@@ -1286,7 +1281,6 @@
+ 	char class[MAX_PATH];
+ 	char class_name[MAX_PATH];
+ 	char tmp[MAX_PATH];
+-	DWORD class_property;
+ 	const char *class_path;
+ 	const char **default_class_keys;
+ 	filter_class_t* found = NULL;
+@@ -1295,7 +1289,6 @@
+ 	bool_t add_device_classes = FALSE;
+ 	bool_t success;
+ 
+-	class_property = SPDRP_CLASSGUID;
+ 	class_path = CLASS_KEY_PATH_NT;
+ 	default_class_keys = default_class_keys_nt;
+ 	i = 0;
+@@ -1432,7 +1425,7 @@
+ 					if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, tmp, 0, KEY_ALL_ACCESS, &reg_class_key) == ERROR_SUCCESS)
+ 					{
+ 						size = sizeof(class_name);
+-						RegQueryValueExA(reg_class_key, "Class", NULL, &reg_type, class_name, &size);
++						RegQueryValueExA(reg_class_key, "Class", NULL, &reg_type, (unsigned char*)class_name, &size);
+ 
+ 						usb_registry_add_class_key(&filter_context->class_filters, tmp, class_name, class, &found,
+ 							(add_all_classes) ? FALSE : refresh_only);
+@@ -1495,7 +1488,7 @@
+ 				if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, tmp, 0, KEY_ALL_ACCESS, &reg_class_key) == ERROR_SUCCESS)
+ 				{
+ 					size = sizeof(class_name);
+-					RegQueryValueExA(reg_class_key, "Class", NULL, &reg_type, class_name, &size);
++					RegQueryValueExA(reg_class_key, "Class", NULL, &reg_type, (unsigned char*)class_name, &size);
+ 					RegCloseKey(reg_class_key);
+ 
+ 					usb_registry_add_class_key(head, tmp, class_name, class, &found, TRUE);
+@@ -1637,13 +1630,13 @@
+ 
+ 	// Get the class filters. A non-existent key means no filters
+ 	size = sizeof(filter_class->class_uppers) - 1;
+-	if (RegQueryValueExA(reg_class_hkey, "UpperFilters", NULL, &reg_type, filter_class->class_uppers, &size) != ERROR_SUCCESS)
++	if (RegQueryValueExA(reg_class_hkey, "UpperFilters", NULL, &reg_type, (unsigned char*)filter_class->class_uppers, &size) != ERROR_SUCCESS)
+ 	{
+ 		memset(filter_class->class_uppers, 0, sizeof(filter_class->class_uppers));
+ 	}
+ 
+ 	size = sizeof(filter_class->class_lowers) - 1;
+-	if (RegQueryValueExA(reg_class_hkey, "LowerFilters", NULL, &reg_type, filter_class->class_lowers, &size) != ERROR_SUCCESS)
++	if (RegQueryValueExA(reg_class_hkey, "LowerFilters", NULL, &reg_type, (unsigned char*)filter_class->class_lowers, &size) != ERROR_SUCCESS)
+ 	{
+ 		memset(filter_class->class_lowers, 0, sizeof(filter_class->class_lowers));
+ 	}
+diff -Naur libusb-win32-src-1.2.6.0/src/windows.c libusb-win32-src-1.2.6.0_fixed/src/windows.c
+--- libusb-win32-src-1.2.6.0/src/windows.c	2011-07-12 07:26:00 +0100
++++ libusb-win32-src-1.2.6.0_fixed/src/windows.c	2014-04-17 10:05:28 +0100
+@@ -83,7 +83,7 @@
+ static void _usb_deinit(void);
+ 
+ /* DLL main entry point */
+-BOOL WINAPI DllMain(HANDLE module, DWORD reason, LPVOID reserved)
++BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved)
+ {
+     switch (reason)
+     {

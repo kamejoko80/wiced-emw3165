@@ -1,0 +1,29 @@
+From 417968d22392f422fadfecf6ff019d3cb1ed5516 Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Mon, 18 May 2015 18:44:51 +0100
+Subject: [PATCH 30/30] Documentation: remove raggedright not supported by
+ MinGW
+
+---
+ doc/openocd.texi | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/doc/openocd.texi b/doc/openocd.texi
+index 511bc6c..da3a109 100644
+--- a/doc/openocd.texi
++++ b/doc/openocd.texi
+@@ -8460,11 +8460,9 @@ Cyg_Thread::thread_list, Cyg_Scheduler_Base::current_thread.
+ @item ThreadX symbols
+ _tx_thread_current_ptr, _tx_thread_created_ptr, _tx_thread_created_count.
+ @item FreeRTOS symbols
+-@raggedright
+ pxCurrentTCB, pxReadyTasksLists, xDelayedTaskList1, xDelayedTaskList2,
+ pxDelayedTaskList, pxOverflowDelayedTaskList, xPendingReadyList,
+ uxCurrentNumberOfTasks, uxTopUsedPriority.
+-@end raggedright
+ @item linux symbols
+ init_task.
+ @item ChibiOS symbols
+-- 
+1.8.3.msysgit.0
+

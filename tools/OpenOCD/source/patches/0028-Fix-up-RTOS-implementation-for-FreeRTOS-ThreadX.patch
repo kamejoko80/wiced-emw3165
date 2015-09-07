@@ -1,0 +1,478 @@
+From b39873a390e9bb7eabc05dba3b5825adb72af493 Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Tue, 19 May 2015 13:28:20 +0100
+Subject: [PATCH] Fix up RTOS implementation for FreeRTOS / ThreadX
+
+---
+ src/rtos/FreeRTOS.c                |  37 +++++++++---
+ src/rtos/ThreadX.c                 | 119 ++++++++++++++++++++++---------------
+ src/rtos/rtos.c                    |   5 +-
+ src/rtos/rtos.h                    |   6 ++
+ src/rtos/rtos_standard_stackings.c | 106 ++++++++++++++++-----------------
+ 5 files changed, 163 insertions(+), 110 deletions(-)
+
+diff --git a/src/rtos/FreeRTOS.c b/src/rtos/FreeRTOS.c
+index e4c3a46..3f4f419 100644
+--- a/src/rtos/FreeRTOS.c
++++ b/src/rtos/FreeRTOS.c
+@@ -149,12 +149,24 @@ static int FreeRTOS_wipe(struct rtos *rtos)
+ 	symbol_table_elem_t *sym = rtos->symbols;
+ 	while (sym->symbol_name != NULL) {
+ 		if  (sym->address == 0)
++		{
++			if (sym->optional)
++			{
++				LOG_DEBUG("No address available for variable %s - not wiping", sym->symbol_name);
++				sym++;
++				continue;
++			}
++			LOG_ERROR("Unable to wipe mandatory variable: %s - address unknown", sym->symbol_name);
+ 			return ERROR_FAIL;
++		}
+ 
+ 		retval = target_write_buffer(rtos->target, sym->address, 4, zeros);
+ 		if (retval != ERROR_OK)
++		{
++			LOG_ERROR("Write failure during wipe of variable: %s at 0x%" LOG_PRIx64, sym->symbol_name, sym->address);
+ 			return retval;
+-		LOG_DEBUG("Wiped rtos variable: %s at 0x%08X", sym->symbol_name, (uint32_t)sym->address);
++		}
++		LOG_DEBUG("Wiped rtos variable: %s at 0x%" LOG_PRIx64, sym->symbol_name, sym->address);
+ 		sym++;
+ 	}
+ 	return retval;
+@@ -205,6 +217,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 	rtos_free_threadlist(rtos);
+ 
+ 	/* read the current thread */
++	rtos->current_thread = 0; /* Clear all 64 bits since read may not set them */
+ 	retval = target_read_buffer(rtos->target,
+ 			rtos->symbols[FreeRTOS_VAL_pxCurrentTCB].address,
+ 			param->pointer_width,
+@@ -230,7 +243,8 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 			LOG_ERROR("Error allocating memory for %d threads", thread_list_size);
+ 			return ERROR_FAIL;
+ 		}
+-		rtos->thread_details->threadid = -1;
++		rtos->current_thread = RTOS_NO_CURRENT_THREAD;
++		rtos->thread_details->threadid = RTOS_NO_CURRENT_THREAD;
+ 		rtos->thread_details->exists = true;
+ 		rtos->thread_details->display_str = NULL;
+ 		rtos->thread_details->extra_info_str = NULL;
+@@ -505,12 +519,21 @@ static int FreeRTOS_get_thread_ascii_info(struct rtos *rtos, threadid_t thread_i
+ 
+ static int FreeRTOS_detect_rtos(struct target *target)
+ {
+-	if ((target->rtos->symbols != NULL) &&
+-			(target->rtos->symbols[FreeRTOS_VAL_pxReadyTasksLists].address != 0)) {
+-		/* looks like FreeRTOS */
+-		return 1;
++	if (target->rtos->symbols == NULL)
++	{
++		LOG_ERROR("Null Symbol list");
++		return 0;
+ 	}
+-	return 0;
++
++	for (symbol_table_elem_t *s = target->rtos->symbols; s->symbol_name; ++s) {
++		if ((!s->optional) && (s->address == 0))
++		{
++			LOG_DEBUG("No address for mandatory FreeRTOS symbol %s - not detecting FreeRTOS", s->symbol_name);
++			return 0;
++		}
++	}
++	/* All mandatory symbols are available - looks like FreeRTOS */
++	return 1;
+ }
+ 
+ static int FreeRTOS_create(struct target *target)
+diff --git a/src/rtos/ThreadX.c b/src/rtos/ThreadX.c
+index 4f20f1e..26ff592 100644
+--- a/src/rtos/ThreadX.c
++++ b/src/rtos/ThreadX.c
+@@ -130,12 +130,24 @@ static int ThreadX_wipe(struct rtos *rtos)
+ 	symbol_table_elem_t *sym = rtos->symbols;
+ 	while (sym->symbol_name != NULL) {
+ 		if (sym->address == 0)
++		{
++			if (sym->optional)
++			{
++				LOG_DEBUG("No address available for variable %s - not wiping", sym->symbol_name);
++				sym++;
++				continue;
++			}
++			LOG_ERROR("Unable to wipe mandatory variable: %s - address unknown", sym->symbol_name);
+ 			return ERROR_FAIL;
++		}
+ 
+ 		retval = target_write_buffer(rtos->target, sym->address, 4, zeros);
+ 		if (retval != ERROR_OK)
++		{
++			LOG_ERROR("Write failure during wipe of variable: %s at 0x%" LOG_PRIx64, sym->symbol_name, sym->address);
+ 			return retval;
+-		LOG_DEBUG("Wiped rtos variable: %s at 0x%08X", sym->symbol_name, (uint32_t)sym->address);
++		}
++		LOG_DEBUG("Wiped rtos variable: %s at 0x%" LOG_PRIx64, sym->symbol_name, sym->address);
+ 		sym++;
+ 	}
+ 	return retval;
+@@ -182,6 +194,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 	rtos_free_threadlist(rtos);
+ 
+ 	/* read the current thread id */
++	rtos->current_thread = 0; /* Clear all 64 bits since read does not set them */
+ 	retval = target_read_buffer(rtos->target,
+ 			rtos->symbols[ThreadX_VAL_tx_thread_current_ptr].address,
+ 			4,
+@@ -192,7 +205,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		return retval;
+ 	}
+ 
+-	LOG_DEBUG("ThreadX: Current thread is 0x%08X", (uint32_t)rtos->current_thread);
++	LOG_DEBUG("ThreadX: Current thread is 0x%" LOG_PRIx64 ", list size is %d", rtos->current_thread, thread_list_size);
+ 
+ 	if ((thread_list_size  == 0) || (rtos->current_thread == 0)) {
+ 		/* Either : No RTOS threads - there is always at least the current execution though */
+@@ -203,7 +216,8 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		tasks_found++;
+ 		rtos->thread_details = malloc(
+ 				sizeof(struct thread_detail) * thread_list_size);
+-		rtos->thread_details->threadid = -1;
++		rtos->current_thread = RTOS_NO_CURRENT_THREAD;
++		rtos->thread_details->threadid = RTOS_NO_CURRENT_THREAD;
+ 		rtos->thread_details->exists = true;
+ 		rtos->thread_details->display_str = NULL;
+ 		rtos->thread_details->extra_info_str = NULL;
+@@ -212,7 +226,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 
+ 		LOG_DEBUG("ThreadX: No RTOS threads or no current thread" );
+ 
+-		if (thread_list_size == 0) {
++		if (thread_list_size == 1) {
+ 			rtos->thread_count = 1;
+ 			return ERROR_OK;
+ 		}
+@@ -242,7 +256,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		unsigned int i = 0;
+ 		int64_t name_ptr = 0;
+ 
+-		LOG_DEBUG("ThreadX: Reading thread 0x%08X", (uint32_t)thread_ptr);
++		LOG_DEBUG("ThreadX: Reading thread 0x%" LOG_PRIx64, thread_ptr);
+ 
+ 		/* Save the thread pointer */
+ 		rtos->thread_details[tasks_found].threadid = thread_ptr;
+@@ -272,7 +286,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		if (tmp_str[0] == '\x00')
+ 			strcpy(tmp_str, "No Name");
+ 
+-		LOG_DEBUG("ThreadX: Thread 0x%08X Name: %s", (uint32_t)thread_ptr, tmp_str);
++		LOG_DEBUG("ThreadX: Thread 0x%" LOG_PRIx64 " Name: %s", thread_ptr, tmp_str);
+ 
+ 		rtos->thread_details[tasks_found].thread_name_str =
+ 			malloc(strlen(tmp_str)+1);
+@@ -300,7 +314,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		else
+ 			state_desc = "Unknown state";
+ 
+-		LOG_DEBUG("ThreadX: Thread 0x%08X State: %s", (uint32_t)thread_ptr, state_desc);
++		LOG_DEBUG("ThreadX: Thread 0x%" LOG_PRIx64 " State: %s", thread_ptr, state_desc);
+ 
+ 		rtos->thread_details[tasks_found].extra_info_str = malloc(strlen(
+ 					state_desc)+1);
+@@ -321,7 +335,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 			LOG_ERROR("Error reading stack frame from ThreadX thread");
+ 			return retval;
+ 		}
+-		LOG_DEBUG("ThreadX: Thread 0x%08X Stack pointer: 0x%08x", (uint32_t)thread_ptr, (uint32_t)stack_ptr);
++		LOG_DEBUG("ThreadX: Thread 0x%" LOG_PRIx64 " Stack pointer: 0x%" LOG_PRIx64 "", thread_ptr, stack_ptr);
+ #endif
+ 
+ 		tasks_found++;
+@@ -399,12 +413,21 @@ static int ThreadX_get_symbol_list_to_lookup(symbol_table_elem_t *symbol_list[])
+ 
+ static int ThreadX_detect_rtos(struct target *target)
+ {
+-	if ((target->rtos->symbols != NULL) &&
+-			(target->rtos->symbols[ThreadX_VAL_tx_thread_created_ptr].address != 0)) {
+-		/* looks like ThreadX */
+-		return 1;
++	if (target->rtos->symbols == NULL)
++	{
++		LOG_ERROR("Null Symbol list");
++		return 0;
+ 	}
+-	return 0;
++
++	for (symbol_table_elem_t *s = target->rtos->symbols; s->symbol_name; ++s) {
++		if ((!s->optional) && (s->address == 0))
++		{
++			LOG_DEBUG("No address for mandatory ThreadX symbol %s - not detecting ThreadX", s->symbol_name);
++			return 0;
++		}
++	}
++	/* All mandatory symbols are available - looks like ThreadX */
++	return 1;
+ }
+ 
+ #if 0
+@@ -524,45 +547,45 @@ static int ThreadX_create(struct target *target)
+ }
+ 
+ static const struct stack_register_offset threadx_Cortex_R4_stack_type0_offsets[] = {
+-    { -1,   32 },		/* r0  (a1) */
+-    { -1,   32 },		/* r1  (a2) */
+-    { -1,   32 },		/* r2  (a3) */
+-    { -1,   32 },		/* r3  (a4) */
+-	{ 0x08, 32 },		/* r4  (v1) */
+-	{ 0x0c, 32 },		/* r5  (v2) */
+-	{ 0x10, 32 },		/* r6  (v3) */
+-	{ 0x14, 32 },		/* r7  (v4) */
+-	{ 0x18, 32 },		/* r8  (a1) */
+-	{ 0x1c, 32 },		/* r9  (sb) */
+-	{ 0x20, 32 },		/* r10 (sl) */
+-	{ 0x24, 32 },		/* r11 (fp) */
+-	{ -1,   32 },		/* r12 (ip) */
+-	{ -2,   32 },		/* sp       */
+-	{ 0x28, 32 },		/* lr       */
+-	{ 0x28, 32 },		/* pc       */
+-	{ 0x04, 32 },		/* CSPR     */
++    { REGISTER_NOT_STACKED,        32 },		/* r0  (a1) */
++    { REGISTER_NOT_STACKED,        32 },		/* r1  (a2) */
++    { REGISTER_NOT_STACKED,        32 },		/* r2  (a3) */
++    { REGISTER_NOT_STACKED,        32 },		/* r3  (a4) */
++	{ 0x08,                        32 },		/* r4  (v1) */
++	{ 0x0c,                        32 },		/* r5  (v2) */
++	{ 0x10,                        32 },		/* r6  (v3) */
++	{ 0x14,                        32 },		/* r7  (v4) */
++	{ 0x18,                        32 },		/* r8  (a1) */
++	{ 0x1c,                        32 },		/* r9  (sb) */
++	{ 0x20,                        32 },		/* r10 (sl) */
++	{ 0x24,                        32 },		/* r11 (fp) */
++	{ REGISTER_NOT_STACKED,        32 },		/* r12 (ip) */
++	{ REGISTER_IS_STACK_POINTER,   32 },		/* sp       */
++	{ 0x28,                        32 },		/* lr       */
++	{ 0x28,                        32 },		/* pc       */
++	{ 0x04,                        32 },		/* CSPR     */
+ };
+ 
+ 
+ 
+ static const struct stack_register_offset threadx_Cortex_R4_stack_type1_offsets[] = {
+-	{ 0x08, 32 },		/* r0  (a1) */
+-	{ 0x0c, 32 },		/* r1  (a2) */
+-	{ 0x10, 32 },		/* r2  (a3) */
+-	{ 0x14, 32 },		/* r3  (a4) */
+-	{ 0x18, 32 },		/* r4  (v1) */
+-	{ 0x1c, 32 },		/* r5  (v2) */
+-	{ 0x20, 32 },		/* r6  (v3) */
+-	{ 0x24, 32 },		/* r7  (v4) */
+-	{ 0x28, 32 },		/* r8  (a1) */
+-	{ 0x2c, 32 },		/* r9  (sb) */
+-	{ 0x30, 32 },		/* r10 (sl) */
+-	{ 0x34, 32 },		/* r11 (fp) */
+-	{ 0x38, 32 },		/* r12 (ip) */
+-	{ -2,   32 },		/* sp       */
+-	{ 0x3c, 32 },		/* lr       */
+-	{ 0x40, 32 },		/* pc       */
+-	{ 0x04, 32 },		/* SPSR     */
++	{ 0x08,                        32 },		/* r0  (a1) */
++	{ 0x0c,                        32 },		/* r1  (a2) */
++	{ 0x10,                        32 },		/* r2  (a3) */
++	{ 0x14,                        32 },		/* r3  (a4) */
++	{ 0x18,                        32 },		/* r4  (v1) */
++	{ 0x1c,                        32 },		/* r5  (v2) */
++	{ 0x20,                        32 },		/* r6  (v3) */
++	{ 0x24,                        32 },		/* r7  (v4) */
++	{ 0x28,                        32 },		/* r8  (a1) */
++	{ 0x2c,                        32 },		/* r9  (sb) */
++	{ 0x30,                        32 },		/* r10 (sl) */
++	{ 0x34,                        32 },		/* r11 (fp) */
++	{ 0x38,                        32 },		/* r12 (ip) */
++	{ REGISTER_IS_STACK_POINTER,   32 },		/* sp       */
++	{ 0x3c,                        32 },		/* lr       */
++	{ 0x40,                        32 },		/* pc       */
++	{ 0x04,                        32 },		/* SPSR     */
+ };
+ 
+ const struct rtos_register_stacking threadx_Cortex_R4_type0_stacking = {
+@@ -591,7 +614,7 @@ static int threadx_r4_stack_read(struct target *target, int64_t stack_ptr, char
+ 	}
+ 
+ 
+-	LOG_DEBUG("ThreadX special R4 stack handling for type %d stack 0x%08x\n", stack_type, (unsigned int) stack_ptr);
++	LOG_DEBUG("ThreadX special R4 stack handling for type %d stack 0x%" LOG_PRIx64 "\n", stack_type, stack_ptr);
+ 	if (stack_type == 0)
+ 	{
+ 		retval = rtos_generic_stack_read(target, &threadx_Cortex_R4_type0_stacking, stack_ptr, hex_reg_list);
+diff --git a/src/rtos/rtos.c b/src/rtos/rtos.c
+index 59b918e..c96229c 100644
+--- a/src/rtos/rtos.c
++++ b/src/rtos/rtos.c
+@@ -66,7 +66,7 @@ static int os_alloc(struct target *target, struct rtos_type *ostype)
+ 		return JIM_ERR;
+ 
+ 	os->type = ostype;
+-	os->current_threadid = -1;
++	os->current_threadid = RTOS_NO_CURRENT_THREAD;
+ 	os->current_thread = 0;
+ 	os->symbols = NULL;
+ 	os->target = target;
+@@ -185,6 +185,7 @@ static bool is_symbol_mandatory(const struct rtos *os, const char *symbol)
+ 		if (!strcmp(s->symbol_name, symbol))
+ 			return !s->optional;
+ 	}
++	LOG_DEBUG("Symbol %s not found", symbol);
+ 	return false;
+ }
+ 
+@@ -431,7 +432,7 @@ int rtos_get_gdb_reg_list(struct connection *connection)
+ {
+ 	struct target *target = get_target_from_connection(connection);
+ 	int64_t current_threadid = target->rtos->current_threadid;
+-	if ((target->rtos != NULL) && (current_threadid != -1) &&
++	if ((target->rtos != NULL) && (current_threadid != RTOS_NO_CURRENT_THREAD) &&
+ 			(current_threadid != 0) &&
+ 			((current_threadid != target->rtos->current_thread) ||
+ 			(target->smp))) {	/* in smp several current thread are possible */
+diff --git a/src/rtos/rtos.h b/src/rtos/rtos.h
+index 7e7d7d2..80649a6 100644
+--- a/src/rtos/rtos.h
++++ b/src/rtos/rtos.h
+@@ -27,6 +27,12 @@
+ typedef int64_t threadid_t;
+ typedef int64_t symbol_address_t;
+ 
++
++#define RTOS_NO_CURRENT_THREAD  ((threadid_t) -1)
++
++#define REGISTER_NOT_STACKED      ((signed short) -1)
++#define REGISTER_IS_STACK_POINTER ((signed short) -2)
++
+ struct reg;
+ 
+ /**
+diff --git a/src/rtos/rtos_standard_stackings.c b/src/rtos/rtos_standard_stackings.c
+index 3268c1d..cb97287 100644
+--- a/src/rtos/rtos_standard_stackings.c
++++ b/src/rtos/rtos_standard_stackings.c
+@@ -26,64 +26,64 @@
+ #include "target/armv7m.h"
+ 
+ static const struct stack_register_offset rtos_standard_Cortex_M3_stack_offsets[ARMV7M_NUM_CORE_REGS] = {
+-	{ 0x20, 32 },		/* r0   */
+-	{ 0x24, 32 },		/* r1   */
+-	{ 0x28, 32 },		/* r2   */
+-	{ 0x2c, 32 },		/* r3   */
+-	{ 0x00, 32 },		/* r4   */
+-	{ 0x04, 32 },		/* r5   */
+-	{ 0x08, 32 },		/* r6   */
+-	{ 0x0c, 32 },		/* r7   */
+-	{ 0x10, 32 },		/* r8   */
+-	{ 0x14, 32 },		/* r9   */
+-	{ 0x18, 32 },		/* r10  */
+-	{ 0x1c, 32 },		/* r11  */
+-	{ 0x30, 32 },		/* r12  */
+-	{ -2,   32 },		/* sp   */
+-	{ 0x34, 32 },		/* lr   */
+-	{ 0x38, 32 },		/* pc   */
+-	{ 0x3c, 32 },		/* xPSR */
++	{ 0x20,                        32 },		/* r0   */
++	{ 0x24,                        32 },		/* r1   */
++	{ 0x28,                        32 },		/* r2   */
++	{ 0x2c,                        32 },		/* r3   */
++	{ 0x00,                        32 },		/* r4   */
++	{ 0x04,                        32 },		/* r5   */
++	{ 0x08,                        32 },		/* r6   */
++	{ 0x0c,                        32 },		/* r7   */
++	{ 0x10,                        32 },		/* r8   */
++	{ 0x14,                        32 },		/* r9   */
++	{ 0x18,                        32 },		/* r10  */
++	{ 0x1c,                        32 },		/* r11  */
++	{ 0x30,                        32 },		/* r12  */
++	{ REGISTER_IS_STACK_POINTER,   32 },		/* sp   */
++	{ 0x34,                        32 },		/* lr   */
++	{ 0x38,                        32 },		/* pc   */
++	{ 0x3c,                        32 },		/* xPSR */
+ };
+ 
+ 
+ 
+ static const struct stack_register_offset rtos_standard_NDS32_N1068_stack_offsets[] = {
+-	{ 0x88, 32 },		/* R0  */
+-	{ 0x8C, 32 },		/* R1 */
+-	{ 0x14, 32 },		/* R2 */
+-	{ 0x18, 32 },		/* R3 */
+-	{ 0x1C, 32 },		/* R4 */
+-	{ 0x20, 32 },		/* R5 */
+-	{ 0x24, 32 },		/* R6 */
+-	{ 0x28, 32 },		/* R7 */
+-	{ 0x2C, 32 },		/* R8 */
+-	{ 0x30, 32 },		/* R9 */
+-	{ 0x34, 32 },		/* R10 */
+-	{ 0x38, 32 },		/* R11 */
+-	{ 0x3C, 32 },		/* R12 */
+-	{ 0x40, 32 },		/* R13 */
+-	{ 0x44, 32 },		/* R14 */
+-	{ 0x48, 32 },		/* R15 */
+-	{ 0x4C, 32 },		/* R16 */
+-	{ 0x50, 32 },		/* R17 */
+-	{ 0x54, 32 },		/* R18 */
+-	{ 0x58, 32 },		/* R19 */
+-	{ 0x5C, 32 },		/* R20 */
+-	{ 0x60, 32 },		/* R21 */
+-	{ 0x64, 32 },		/* R22 */
+-	{ 0x68, 32 },		/* R23 */
+-	{ 0x6C, 32 },		/* R24 */
+-	{ 0x70, 32 },		/* R25 */
+-	{ 0x74, 32 },		/* R26 */
+-	{ 0x78, 32 },		/* R27 */
+-	{ 0x7C, 32 },		/* R28 */
+-	{ 0x80, 32 },		/* R29 */
+-	{ 0x84, 32 },		/* R30 (LP) */
+-	{ 0x00, 32 },		/* R31 (SP) */
+-	{ 0x04, 32 },		/* PSW */
+-	{ 0x08, 32 },		/* IPC */
+-	{ 0x0C, 32 },		/* IPSW */
+-	{ 0x10, 32 },		/* IFC_LP */
++	{ 0x88,                        32 },		/* R0  */
++	{ 0x8C,                        32 },		/* R1 */
++	{ 0x14,                        32 },		/* R2 */
++	{ 0x18,                        32 },		/* R3 */
++	{ 0x1C,                        32 },		/* R4 */
++	{ 0x20,                        32 },		/* R5 */
++	{ 0x24,                        32 },		/* R6 */
++	{ 0x28,                        32 },		/* R7 */
++	{ 0x2C,                        32 },		/* R8 */
++	{ 0x30,                        32 },		/* R9 */
++	{ 0x34,                        32 },		/* R10 */
++	{ 0x38,                        32 },		/* R11 */
++	{ 0x3C,                        32 },		/* R12 */
++	{ 0x40,                        32 },		/* R13 */
++	{ 0x44,                        32 },		/* R14 */
++	{ 0x48,                        32 },		/* R15 */
++	{ 0x4C,                        32 },		/* R16 */
++	{ 0x50,                        32 },		/* R17 */
++	{ 0x54,                        32 },		/* R18 */
++	{ 0x58,                        32 },		/* R19 */
++	{ 0x5C,                        32 },		/* R20 */
++	{ 0x60,                        32 },		/* R21 */
++	{ 0x64,                        32 },		/* R22 */
++	{ 0x68,                        32 },		/* R23 */
++	{ 0x6C,                        32 },		/* R24 */
++	{ 0x70,                        32 },		/* R25 */
++	{ 0x74,                        32 },		/* R26 */
++	{ 0x78,                        32 },		/* R27 */
++	{ 0x7C,                        32 },		/* R28 */
++	{ 0x80,                        32 },		/* R29 */
++	{ 0x84,                        32 },		/* R30 (LP) */
++	{ 0x00,                        32 },		/* R31 (SP) */
++	{ 0x04,                        32 },		/* PSW */
++	{ 0x08,                        32 },		/* IPC */
++	{ 0x0C,                        32 },		/* IPSW */
++	{ 0x10,                        32 },		/* IFC_LP */
+ };
+ 
+ const struct rtos_register_stacking rtos_standard_Cortex_M3_stacking = {
+-- 
+1.8.3.msysgit.0
+

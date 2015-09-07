@@ -1,0 +1,25 @@
+From 24bd92453136d784239a982560c16c0f21fed17e Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Thu, 20 Nov 2014 15:00:05 +0000
+Subject: [PATCH 34/40] gdb_server: Add thread update when running
+ gdb_sig_halted
+
+---
+ src/server/gdb_server.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/server/gdb_server.c b/src/server/gdb_server.c
+index c741f0c..b097f60 100644
+--- a/src/server/gdb_server.c
++++ b/src/server/gdb_server.c
+@@ -2767,6 +2767,7 @@ static int gdb_input_inner(struct connection *connection)
+ 						 * register values without modifying the target state.
+ 						 *
+ 						 */
++						rtos_update_threads(target);
+ 						gdb_sig_halted(connection);
+ 
+ 						/* stop forwarding log packets! */
+-- 
+1.8.3.msysgit.0
+

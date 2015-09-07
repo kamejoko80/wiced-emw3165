@@ -1,0 +1,126 @@
+From 3b1c3792fd98960d8b9538f5d032b14118e05a47 Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Mon, 18 May 2015 19:04:04 +0100
+Subject: [PATCH] TCL: Delete files with unicode names that MinGW can't handle
+ properly
+
+---
+ "tcl/target/1986\320\262\320\2651\321\202.cfg"  | 63 -------------------------
+ "tcl/target/\320\2721879x\320\2611\321\217.cfg" | 35 --------------
+ 2 files changed, 98 deletions(-)
+ delete mode 100644 "tcl/target/1986\320\262\320\2651\321\202.cfg"
+ delete mode 100644 "tcl/target/\320\2721879x\320\2611\321\217.cfg"
+
+diff --git "a/tcl/target/1986\320\262\320\2651\321\202.cfg" "b/tcl/target/1986\320\262\320\2651\321\202.cfg"
+deleted file mode 100644
+index 7b0c35f..0000000
+--- "a/tcl/target/1986\320\262\320\2651\321\202.cfg"
++++ /dev/null
+@@ -1,63 +0,0 @@
+-# 1986ВЕ1Т
+-# http://milandr.ru/index.php?mact=Products,cntnt01,details,0&cntnt01productid=236&cntnt01returnid=68
+-
+-source [find target/swj-dp.tcl]
+-
+-if { [info exists CHIPNAME] } {
+-   set _CHIPNAME $CHIPNAME
+-} else {
+-   set _CHIPNAME 1986ве1т
+-}
+-
+-if { [info exists ENDIAN] } {
+-   set _ENDIAN $ENDIAN
+-} else {
+-   set _ENDIAN little
+-}
+-
+-# Work-area is a space in RAM used for flash programming
+-if { [info exists WORKAREASIZE] } {
+-   set _WORKAREASIZE $WORKAREASIZE
+-} else {
+-   set _WORKAREASIZE 0x4000
+-}
+-
+-#jtag scan chain
+-if { [info exists CPUTAPID] } {
+-   set _CPUTAPID $CPUTAPID
+-} else {
+-   if { [using_jtag] } {
+-      set _CPUTAPID 0x4ba00477
+-   } {
+-      # SWD IDCODE
+-      set _CPUTAPID 0x2ba01477
+-   }
+-}
+-swj_newdap $_CHIPNAME cpu -irlen 4 -ircapture 0x1 -irmask 0xf -expected-id $_CPUTAPID
+-
+-set _TARGETNAME $_CHIPNAME.cpu
+-target create $_TARGETNAME cortex_m -endian $_ENDIAN -chain-position $_TARGETNAME
+-
+-# use AHB-Lite SRAM for work area
+-$_TARGETNAME configure -work-area-phys 0x20100000 -work-area-size $_WORKAREASIZE -work-area-backup 0
+-
+-# can't handle overlapping memory regions
+-if { [info exists IMEMORY] && [string equal $IMEMORY true] } {
+-   flash bank ${_CHIPNAME}_info.flash mdr 0x00000000 0x01000 0 0 $_TARGETNAME 1 1 4
+-} else {
+-   flash bank $_CHIPNAME.flash mdr 0x00000000 0x20000 0 0 $_TARGETNAME 0 32 4
+-}
+-
+-# JTAG speed should be <= F_CPU/6. F_CPU after reset is 8MHz, so use F_JTAG = 1MHz
+-adapter_khz 1000
+-
+-adapter_nsrst_delay 100
+-if {[using_jtag]} {
+-   jtag_ntrst_delay 100
+-}
+-
+-if {![using_hla]} {
+-   # if srst is not fitted use SYSRESETREQ to
+-   # perform a soft reset
+-   cortex_m reset_config sysresetreq
+-}
+diff --git "a/tcl/target/\320\2721879x\320\2611\321\217.cfg" "b/tcl/target/\320\2721879x\320\2611\321\217.cfg"
+deleted file mode 100644
+index 7d8c113..0000000
+--- "a/tcl/target/\320\2721879x\320\2611\321\217.cfg"
++++ /dev/null
+@@ -1,35 +0,0 @@
+-# СБИС К1879ХБ1Я
+-# http://www.module.ru/catalog/micro/mikroshema_dekodera_cifrovogo_televizionnogo_signala_sbis_k1879hb1ya/
+-
+-adapter_khz 1000
+-
+-if { [info exists CHIPNAME] } {
+-    set _CHIPNAME $CHIPNAME
+-} else {
+-    set _CHIPNAME к1879хб1я
+-}
+-
+-if { [info exists ENDIAN] } {
+-    set _ENDIAN $ENDIAN
+-} else {
+-    set _ENDIAN little
+-}
+-
+-if { [info exists DSP_TAPID] } {
+-    set _DSP_TAPID $DSP_TAPID
+-} else {
+-    set _DSP_TAPID 0x2b900f0f
+-}
+-
+-jtag newtap $_CHIPNAME dsp -irlen 4 -expected-id $_DSP_TAPID
+-
+-if { [info exists CPU_TAPID] } {
+-    set _CPU_TAPID $CPU_TAPID
+-} else {
+-    set _CPU_TAPID 0x07b76f0f
+-}
+-
+-jtag newtap $_CHIPNAME arm -irlen 5 -expected-id $_CPU_TAPID
+-
+-set _TARGETNAME $_CHIPNAME.arm
+-target create $_TARGETNAME arm11 -chain-position $_CHIPNAME.arm
+-- 
+1.8.3.msysgit.0
+

@@ -1,0 +1,35 @@
+From 4559c4b256fbb1b4e7669589c90f2326cd6be8fc Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Mon, 30 Jun 2014 20:50:44 -0700
+Subject: [PATCH 30/40] Cortex A/R: Add debug description of reason for halt
+
+---
+ src/target/cortex_a.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/target/cortex_a.c b/src/target/cortex_a.c
+index 6e94f18..8e0341a 100644
+--- a/src/target/cortex_a.c
++++ b/src/target/cortex_a.c
+@@ -872,7 +872,17 @@ static int cortex_a_poll(struct target *target)
+ 	if (DSCR_RUN_MODE(dscr) == (DSCR_CORE_HALTED | DSCR_CORE_RESTARTED)) {
+ 		if (prev_target_state != TARGET_HALTED) {
+ 			/* We have a halting debug event */
+-			LOG_DEBUG("Target halted");
++			int moe = (dscr & DSCR_ENTRY_MASK)>>2;
++			LOG_DEBUG("Target halted - Cause: %s", (moe == 0)? "Halt Request":
++												   (moe == 1)? "Breakpoint":
++												   (moe == 2)? "Asynchronous Watchpoint":
++												   (moe == 3)? "BKPT instruction":
++												   (moe == 4)? "External Debug Request":
++												   (moe == 5)? "Vector Catch":
++												   (moe == 6)? "Data-side abort":
++												   (moe == 7)? "Instruction-side abort":
++												   (moe == 8)? "OS Unlock Catch":
++												   (moe == 10)? "Synchronous Watchpoint": "Unknown" );
+ 			target->state = TARGET_HALTED;
+ 			if ((prev_target_state == TARGET_RUNNING)
+ 				|| (prev_target_state == TARGET_UNKNOWN)
+-- 
+1.8.3.msysgit.0
+

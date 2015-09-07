@@ -1,0 +1,40 @@
+From 03d52712c903a940d88cbd612370d3128d72f101 Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Wed, 16 Apr 2014 10:28:32 +0100
+Subject: [PATCH 23/40] Fix ThreadX/FreeRTOS current execution when there are
+ no threads. Add logging
+
+---
+ src/rtos/FreeRTOS.c | 2 +-
+ src/rtos/ThreadX.c  | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/rtos/FreeRTOS.c b/src/rtos/FreeRTOS.c
+index 1418207..9348ca2 100644
+--- a/src/rtos/FreeRTOS.c
++++ b/src/rtos/FreeRTOS.c
+@@ -209,7 +209,7 @@ static int FreeRTOS_update_threads(struct rtos *rtos)
+ 			LOG_ERROR("Error allocating memory for %d threads", thread_list_size);
+ 			return ERROR_FAIL;
+ 		}
+-		rtos->thread_details->threadid = 1;
++		rtos->thread_details->threadid = -1;
+ 		rtos->thread_details->exists = true;
+ 		rtos->thread_details->display_str = NULL;
+ 		rtos->thread_details->extra_info_str = NULL;
+diff --git a/src/rtos/ThreadX.c b/src/rtos/ThreadX.c
+index fb9f5f7..ece85f4 100644
+--- a/src/rtos/ThreadX.c
++++ b/src/rtos/ThreadX.c
+@@ -176,7 +176,7 @@ static int ThreadX_update_threads(struct rtos *rtos)
+ 		tasks_found++;
+ 		rtos->thread_details = malloc(
+ 				sizeof(struct thread_detail) * thread_list_size);
+-		rtos->thread_details->threadid = 1;
++		rtos->thread_details->threadid = -1;
+ 		rtos->thread_details->exists = true;
+ 		rtos->thread_details->display_str = NULL;
+ 		rtos->thread_details->extra_info_str = NULL;
+-- 
+1.8.3.msysgit.0
+

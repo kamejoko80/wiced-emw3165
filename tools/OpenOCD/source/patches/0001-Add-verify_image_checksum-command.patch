@@ -1,0 +1,75 @@
+From da56a28f586cb800d726ff1caf24b1bbd1c4a61d Mon Sep 17 00:00:00 2001
+From: Broadcom WICED <broadcom_wiced@broadcom.local>
+Date: Fri, 16 Mar 2012 13:01:20 +1100
+Subject: [PATCH 15/40] Add verify_image_checksum command
+
+Signed-off-by: Broadcom WICED <broadcom_wiced@broadcom.local>
+---
+ src/target/target.c | 24 ++++++++++++++++++++----
+ 1 file changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/src/target/target.c b/src/target/target.c
+index 4ea445f..796a263 100644
+--- a/src/target/target.c
++++ b/src/target/target.c
+@@ -3234,7 +3234,7 @@ COMMAND_HANDLER(handle_dump_image_command)
+ 	return retval;
+ }
+ 
+-static COMMAND_HELPER(handle_verify_image_command_internal, int verify)
++static COMMAND_HELPER(handle_verify_image_command_internal, int verify, int verify_checksum_only)
+ {
+ 	uint8_t *buffer;
+ 	size_t buf_cnt;
+@@ -3305,7 +3305,12 @@ static COMMAND_HELPER(handle_verify_image_command_internal, int verify)
+ 				free(buffer);
+ 				break;
+ 			}
+-
++			if ( ( checksum != mem_checksum ) && ( verify_checksum_only == 1 ) ) {
++				LOG_ERROR("checksum mismatch");
++				free(buffer);
++				retval = ERROR_FAIL;
++				goto done;
++			}
+ 			if (checksum != mem_checksum) {
+ 				/* failed crc checksum, fall back to a binary compare */
+ 				uint8_t *data;
+@@ -3370,14 +3375,19 @@ done:
+ 	return retval;
+ }
+ 
++COMMAND_HANDLER(handle_verify_image_checksum_command)
++{
++	return CALL_COMMAND_HANDLER(handle_verify_image_command_internal, 1, 1);
++}
++
+ COMMAND_HANDLER(handle_verify_image_command)
+ {
+-	return CALL_COMMAND_HANDLER(handle_verify_image_command_internal, 1);
++	return CALL_COMMAND_HANDLER(handle_verify_image_command_internal, 1, 0);
+ }
+ 
+ COMMAND_HANDLER(handle_test_image_command)
+ {
+-	return CALL_COMMAND_HANDLER(handle_verify_image_command_internal, 0);
++	return CALL_COMMAND_HANDLER(handle_verify_image_command_internal, 0, 0);
+ }
+ 
+ static int handle_bp_command_list(struct command_context *cmd_ctx)
+@@ -6070,6 +6080,12 @@ static const struct command_registration target_exec_command_handlers[] = {
+ 		.usage = "filename address size",
+ 	},
+ 	{
++		.name = "verify_image_checksum",
++		.handler = handle_verify_image_checksum_command,
++		.mode = COMMAND_EXEC,
++		.usage = "filename [offset [type]]",
++	},
++	{
+ 		.name = "verify_image",
+ 		.handler = handle_verify_image_command,
+ 		.mode = COMMAND_EXEC,
+-- 
+1.8.3.msysgit.0
+
